@@ -15,13 +15,14 @@ PKG_LICENSE_FILES:=LICENSE
 PKG_BUILD_DIR:=$(BUILD_DIR)/beszel-$(PKG_VERSION)
 
 include $(INCLUDE_DIR)/package.mk
+include $(TOPDIR)/feeds/packages/lang/golang/golang-package.mk
 
 define Package/beszel-agent
   SECTION:=net
   CATEGORY:=Network
   TITLE:=Beszel monitoring agent
   URL:=https://beszel.dev
-  BUILD_DEPENDS:=golang/host
+  DEPENDS:=$(GO_ARCH_DEPENDS)
 endef
 
 define Package/beszel-agent/description
