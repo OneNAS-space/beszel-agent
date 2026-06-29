@@ -17,9 +17,6 @@ PKG_BUILD_DEPENDS:=golang/host
 PKG_BUILD_PARALLEL:=1
 PKG_USE_MIPS16:=0
 
-GO_PKG:=github.com/henrygd/beszel/agent
-GO_PKG_BUILD_PKG:=github.com/henrygd/beszel/agent
-
 include $(INCLUDE_DIR)/package.mk
 include $(TOPDIR)/feeds/packages/lang/golang/golang-package.mk
 
@@ -40,6 +37,11 @@ define Package/beszel-agent/conffiles
 /etc/config/beszel-agent
 endef
 
+define Build/Compile
+	$(call Go/Compile,$(PKG_BUILD_DIR))
+	$(call Go/Build,$(PKG_BUILD_DIR),./internal/cmd/agent)
+endef
+
 define Package/beszel-agent/install
 	$(INSTALL_DIR) $(1)/usr/bin
 	$(INSTALL_BIN) $(GO_PKG_BUILD_BIN_DIR)/agent $(1)/usr/bin/beszel-agent
@@ -51,5 +53,4 @@ define Package/beszel-agent/install
 	$(INSTALL_BIN) ./files/beszel-agent.init $(1)/etc/init.d/beszel-agent
 endef
 
-$(eval $(call GoPackage,beszel-agent))
 $(eval $(call BuildPackage,beszel-agent))
