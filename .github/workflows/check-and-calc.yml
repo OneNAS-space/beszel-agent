@@ -1,0 +1,85 @@
+name: Auto Update Beszel Agent Makefile
+
+on:
+  schedule:
+    - cron: '0 0 * * *' 
+  workflow_dispatch:
+  push:
+    branches:
+      - "main"
+    paths:
+      - "Makefile"
+
+permissions:
+  contents: write
+
+jobs:
+  check_and_update:
+    name: Check upstream and update Makefile
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: 🔍 Check for updates & Update Makefile
+        run: |
+          set -euo pipefail
+
+          # 提取当前 Makefile 中的版本号
+          CURRENT_VER=$(grep '^PKG_VERSION:=' Makefile | awk -F= '{print $2}' | tr -d '[:space:]' || true)
+          echo "Current Version: $CURRENT_VER"
+
+          if [ -z "$CURRENT_VER" ]; then
+            echo "❌ Error: Could not find PKG_VERSION in Makefile."
+            exit 1
+          fi
+
+          # 获取 henrygd/beszel 仓库的最新 Release Tag
+          LATEST_TAG=$(curl -s "https://api.github.com/repos/henrygd/beszel/releases/latest" | jq -r '.tag_name' | sed 's/^v//')
+          echo "Latest Version:  $LATEST_TAG"
+
+          if [ -z "$LATEST_TAG" ] || [ "$LATEST_TAG" = "null" ]; then
+            echo "❌ Failed to fetch the latest version from GitHub."
+            exit 1
+          fi
+
+          if [ "$CURRENT_VER" = "$LATEST_TAG" ]; then
+            echo "✅ Package is already up to date ($CURRENT_VER)."
+            exit 0
+          fi
+
+          echo "🚀 New version found! Updating from $CURRENT_VER to $LATEST_TAG..."
+
+          # 构建下载链接并计算新的 SHA256 Hash
+          TAR_URL="https://codeload.github.com/henrygd/beszel/tar.gz/v${LATEST_TAG}"
+          echo "Downloading source to calculate hash..."
+          NEW_HASH=$(curl -sL "$TAR_URL" | sha256sum | awk '{print $1}')
+          echo "New Hash: $NEW_HASH"
+
+          if [ -z "$NEW_HASH" ]; then
+            echo "❌ Failed to calculate new hash."
+            exit 1
+          fi
+
+          # 使用 sed 自动更新 Makefile
+          sed -i "s|^PKG_VERSION:=.*|PKG_VERSION:=$LATEST_TAG|" Makefile
+          sed -i "s|^PKG_HASH:=.*|PKG_HASH:=$NEW_HASH|" Makefile
+          sed -i "s|^PKG_RELEASE:=.*|PKG_RELEASE:=1|" Makefile
+          
+          # 自动修改维护者信息
+          sed -i 's|^PKG_MAINTAINER:=.*|PKG_MAINTAINER:=Jackie264 <OneNAS-space>|' Makefile
+
+          # 提交更改到仓库
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Makefile
+          
+          if git diff --staged --quiet; then
+            echo "ℹ️ No changes to commit."
+          else
+            git commit -m "chore: update beszel to v$LATEST_TAG"
+            git push
+            echo "✅ Successfully updated to v$LATEST_TAG"
+          fi
