@@ -1,4 +1,4 @@
-name: Auto Update Beszel Agent Makefile
+name: Auto Update beszel-agent Makefile
 
 on:
   schedule:
