@@ -4,10 +4,9 @@ PKG_NAME:=beszel-agent
 PKG_VERSION:=0.9.1
 PKG_RELEASE:=1
 
-PKG_SOURCE_PROTO:=git
-PKG_SOURCE_URL:=https://github.com/henrygd/beszel.git
-PKG_SOURCE_VERSION:=v$(PKG_VERSION)
-PKG_MIRROR_HASH:=skip
+PKG_SOURCE:=beszel-$(PKG_VERSION).tar.gz
+PKG_SOURCE_URL:=https://codeload.github.com/henrygd/beszel/tar.gz/v$(PKG_VERSION)?
+PKG_HASH:=1d95096db7d4bf09c7164b4c7be5a73e35aabebec110795c643b2f565b939e7f
 
 PKG_MAINTAINER:=Jackie264 <OneNAS-space>
 PKG_LICENSE:=MIT
