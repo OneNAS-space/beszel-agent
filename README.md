@@ -1,6 +1,7 @@
 # beszel-agent
 Lightweight server monitoring agent packaged for OpenWrt
 #### (Based on the official source code)
+Automatically synchronize and track the latest version of upstream
 
 ### Attribution
 #### Reference
