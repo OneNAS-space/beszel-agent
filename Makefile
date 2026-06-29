@@ -12,10 +12,13 @@ PKG_MAINTAINER:=Jackie264 <OneNAS-space>
 PKG_LICENSE:=MIT
 PKG_LICENSE_FILES:=LICENSE
 
-PKG_BUILD_DIR:=$(BUILD_DIR)/beszel-$(PKG_VERSION)
 PKG_BUILD_DEPENDS:=golang/host
 PKG_BUILD_PARALLEL:=1
 PKG_USE_MIPS16:=0
+
+GO_PKG:=github.com/henrygd/beszel
+GO_PKG_BUILD_PKG:=$(GO_PKG)/internal/cmd/agent
+GO_PKG_TAGS:=
 
 include $(INCLUDE_DIR)/package.mk
 include $(TOPDIR)/feeds/packages/lang/golang/golang-package.mk
@@ -37,16 +40,9 @@ define Package/beszel-agent/conffiles
 /etc/config/beszel-agent
 endef
 
-define Build/Compile
-	$(call Go/Compile,$(PKG_BUILD_DIR))
-	$(GO_VARS) go build -o $(PKG_BUILD_DIR)/beszel-agent-bin \
-		-ldflags "-s -w" \
-		$(PKG_BUILD_DIR)/internal/cmd/agent
-endef
-
 define Package/beszel-agent/install
 	$(INSTALL_DIR) $(1)/usr/bin
-	$(INSTALL_BIN) $(GO_PKG_BUILD_BIN_DIR)/agent $(1)/usr/bin/beszel-agent
+	$(INSTALL_BIN) $(PKG_INSTALL_DIR)/usr/bin/agent $(1)/usr/bin/beszel-agent
 
 	$(INSTALL_DIR) $(1)/etc/config
 	$(INSTALL_CONF) ./files/beszel-agent.config $(1)/etc/config/beszel-agent
@@ -55,4 +51,5 @@ define Package/beszel-agent/install
 	$(INSTALL_BIN) ./files/beszel-agent.init $(1)/etc/init.d/beszel-agent
 endef
 
+$(eval $(call BuildPackage,beszel-agent))
 $(eval $(call BuildPackage,beszel-agent))
