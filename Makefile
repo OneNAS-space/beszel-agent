@@ -1,6 +1,6 @@
 include $(TOPDIR)/rules.mk
 
-PKG_NAME:=beszel-agent
+PKG_NAME:=beszel
 PKG_VERSION:=0.18.7
 PKG_RELEASE:=1
 
@@ -12,6 +12,7 @@ PKG_MAINTAINER:=Jackie264 <OneNAS-space>
 PKG_LICENSE:=MIT
 PKG_LICENSE_FILES:=LICENSE
 
+PKG_BUILD_DIR:=$(BUILD_DIR)/beszel-$(PKG_VERSION)
 PKG_BUILD_DEPENDS:=golang/host
 PKG_BUILD_PARALLEL:=1
 PKG_USE_MIPS16:=0
@@ -44,11 +45,11 @@ define Package/beszel-agent/install
 	$(INSTALL_DIR) $(1)/usr/bin
 	$(INSTALL_BIN) $(PKG_INSTALL_DIR)/usr/bin/agent $(1)/usr/bin/beszel-agent
 
-	$(INSTALL_DIR) $(1)/etc/config
-	$(INSTALL_CONF) ./files/beszel-agent.config $(1)/etc/config/beszel-agent
-
 	$(INSTALL_DIR) $(1)/etc/init.d
 	$(INSTALL_BIN) ./files/beszel-agent.init $(1)/etc/init.d/beszel-agent
+
+	$(INSTALL_DIR) $(1)/etc/config
+	$(INSTALL_CONF) ./files/beszel-agent.config $(1)/etc/config/beszel-agent
 endef
 
 $(eval $(call BuildPackage,beszel-agent))
