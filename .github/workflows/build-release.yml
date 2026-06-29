@@ -1,0 +1,242 @@
+permissions:
+  contents: write
+name: Build OpenWrt Package
+
+on:
+  workflow_dispatch:
+  workflow_run:
+    workflows: ["Auto Update beszel-agent Makefile"]
+    types:
+      - completed
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+  
+jobs:
+  check:
+    name: 1. Resolve & Fingerprint
+    runs-on: ubuntu-latest
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.name == 'Auto Update beszel-agent Makefile')
+    outputs:
+      should_build: ${{ steps.decide.outputs.should_build }}
+      resolved_tag: ${{ steps.version.outputs.full_version }}
+      pkg_version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: 🧾 Checkout repo
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: 📦 Extract Version from Makefile
+        id: version
+        run: |
+          V=$(grep -E '^PKG_VERSION[:=]' Makefile | head -n1 | awk -F= '{print $2}' | tr -d '[:space:]')
+          if [ -z "$V" ]; then
+            SD=$(grep -E '^PKG_SOURCE_DATE[:=]' Makefile | head -n1 | awk -F= '{print $2}' | tr -d '[:space:]')
+            SV=$(grep -E '^PKG_SOURCE_VERSION[:=]' Makefile | head -n1 | awk -F= '{print $2}' | tr -d '[:space:]' | cut -c1-8)
+            V="${SD//-/.}.${SV}"
+          fi
+          R=$(grep -E '^PKG_RELEASE[:=]' Makefile | head -n1 | awk -F= '{print $2}' | tr -d '[:space:]')
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          echo "full_version=v$V-r$R" >> "$GITHUB_OUTPUT"
+          echo "V_TEMP=$V" >> $GITHUB_ENV
+          echo "📦 Version: v$V-r$R"
+
+      - name: 🔎 Decide whether build is needed
+        id: decide
+        env:
+          HEAD_COMMIT_MESSAGE: ${{ github.event.workflow_run.head_commit.message }}
+        run: |
+          SHOULD_BUILD="true"
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            echo "👋 Manual run detected. Forcing build."
+            echo "should_build=$SHOULD_BUILD" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          
+          FULL_V="${{ steps.version.outputs.full_version }}"
+          echo "Checking status for full tag: $FULL_V"
+          
+          MSG="$HEAD_COMMIT_MESSAGE"
+          [ -z "$MSG" ] && MSG=$(git log -1 --pretty=%B)
+          FP=$(echo "$MSG" | sed -n 's/.*FP=\([0-9a-f]\{64\}\).*/\1/p')
+          
+          if [ -n "$FP" ] && [ -f .last-fingerprint ]; then
+            if [ "$FP" = "$(cat .last-fingerprint)" ]; then
+              echo "✅ Fingerprint matches. Skipping."
+              SHOULD_BUILD="false"
+            fi
+          fi
+          
+          if git ls-remote --exit-code --tags origin "refs/tags/$FULL_V" >/dev/null 2>&1; then
+             echo "⚠️ Tag $FULL_V already exists. Skipping build."
+             SHOULD_BUILD="false"
+          fi
+          
+          echo "should_build=$SHOULD_BUILD" >> "$GITHUB_OUTPUT"
+          echo "Final Decision: SHOULD_BUILD=$SHOULD_BUILD"
+
+  build:
+    name: 2. Build (${{ matrix.target }} / ${{ matrix.version }})
+    needs: check
+    if: needs.check.outputs.should_build == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - version: openwrt-25.12
+            target: x86_64
+          - version: openwrt-25.12
+            target: aarch64_cortex-a53
+          - version: openwrt-25.12
+            target: arm_cortex-a7_neon-vfpv4
+
+    steps:
+      - name: 🧾 Checkout repo
+        uses: actions/checkout@v7
+
+      - name: 📛 Set Environment
+        run: |
+          echo "PKG_NAME=${{ github.event.repository.name }}" >> "$GITHUB_ENV"
+          echo "ARCH=${{ matrix.target }}-${{ matrix.version }}" >> "$GITHUB_ENV"
+
+      - name: 🧰 Set up beszel-agent feed structure
+        run: |
+          set -e
+          mkdir -p feed/jackie264
+          printf 'include $(TOPDIR)/feed/jackie264/*/Makefile\n' > feed/jackie264/custom.mk
+
+          rsync -av \
+            --exclude='.git/' \
+            --exclude='feed/' \
+            --exclude='.github/' \
+            --exclude='LICENSE' \
+            --exclude='README.md' \
+            --exclude='SECURITY.md' \
+            ./ feed/jackie264/${PKG_NAME}/
+
+      - name: 🏗️ Build with OpenWrt SDK
+        uses: openwrt/gh-action-sdk@v11
+        env:
+          ARCH: ${{ env.ARCH }}
+          FEEDNAME: jackie264
+          PACKAGES: ${{ env.PKG_NAME }}
+          INDEX: 0
+          FEED_DIR: ${{ github.workspace }}/feed
+          NO_SHFMT_CHECK: 1
+          NO_REFRESH_CHECK: 1
+          V: s
+          
+      - name: 🔍 Debug build output
+        run: |
+          echo "=== Build directory structure ==="
+          find . -name "*.apk" -type f 2>/dev/null || echo "No .apk files found"
+          echo "=== bin directory structure ==="
+          ls -la bin/ 2>/dev/null || echo "No bin directory found"
+          if [ -d "bin/packages" ]; then
+            echo "=== packages directory structure ==="
+            find bin/packages/ -type f -name "*.apk" 2>/dev/null || echo "No .apk files in packages directory"
+            echo "=== Full packages directory tree ==="
+            ls -laR bin/packages/ 2>/dev/null || echo "No packages directory"
+          fi
+
+      - name: 📦 Prepare and Rename APK artifacts
+        run: |
+          find bin/packages/ -name "*.apk" | while read -r f; do
+            mv "$f" "${f%.apk}-${{ matrix.target }}.apk"
+          done
+
+      - name: 📦 Upload artifact for ${{ matrix.target }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ env.PKG_NAME }}-${{ matrix.target }}-${{ matrix.version }}
+          path: |
+            bin/packages/*/jackie264/${{ env.PKG_NAME }}*.apk
+          if-no-files-found: ignore
+
+  release:
+    name: 3. Release & Deploy ${{ github.repository }}
+    needs: [check, build]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 🧾 Checkout repo
+        uses: actions/checkout@v7
+
+      - name: ⬇️ Download all build artifacts
+        uses: actions/download-artifact@v8
+        with:
+          path: ./release-assets
+
+      - name: 🚀 Robust Release (Native GH CLI)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.check.outputs.resolved_tag }}
+          TITLE: "Build -${{ needs.check.outputs.resolved_tag }}"
+        run: |
+          gh release view "$TAG" || gh release create "$TAG" --title "$TAG" --notes ""
+          echo "Uploading assets to $TAG..."
+          find ./release-assets -type f -name "*.apk" | while read -r file; do
+            echo "⬆️ Uploading $(basename "$file")..."
+            gh release upload "$TAG" "$file" --clobber
+          done
+          echo "🎉 All assets uploaded successfully."
+
+      - name: 🔑 Checkout custom-packages repo
+        uses: actions/checkout@v7
+        with:
+          repository: OneNAS-space/custom-packages
+          token: ${{ secrets.CUSTOM_PACKAGES_TOKEN }}
+          path: custom-packages
+
+      - name: 🚚 Update beszel-agent artifacts
+        run: |
+          set -e
+          PKG_NAME="${{ github.event.repository.name }}"
+
+          find ./release-assets -type f -name "*.apk" | while read -r f; do
+            base=$(basename "$f")
+            archdir=$(echo "$f" | sed -E 's#.*/beszel-agent-([^/]+)-openwrt.*#\1#')
+            
+            standard_name=$(echo "$base" | sed "s/-$archdir//")
+            pkgname=$(echo "$standard_name" | cut -d- -f1)
+            dest_dir="custom-packages/releases/packages-25.12/$archdir/packages"
+            
+            mkdir -p "$dest_dir"
+            echo "Cleaning old versions of $pkgname in $archdir"
+            rm -f "$dest_dir/${pkgname}"*.apk
+            echo "✅ [25.12] Deployed $base as $standard_name to $archdir"
+            cp "$f" "$dest_dir/$standard_name"
+            ls -la "$dest_dir/${pkgname}"* || echo "No APKs found"
+          done
+
+          cd custom-packages
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add .
+          git commit -m "Update $PKG_NAME to ${{ needs.check.outputs.resolved_tag }}" || echo "No changes to commit"
+          
+          for i in {1..5}; do
+            git pull --rebase origin main && \
+            git push origin main && break || \
+            (echo "Conflict detected, retrying in 5s..." && sleep 5)
+          done
+
+      - name: 📝 Update Fingerprint after success
+        if: success()
+        env:
+          HEAD_COMMIT_MESSAGE: ${{ github.event.workflow_run.head_commit.message }}
+        run: |
+          FP=$(echo "$HEAD_COMMIT_MESSAGE" | sed -n 's/.*FP=\([0-9a-f]\{64\}\).*/\1/p')
+          if [ -n "$FP" ]; then
+            echo "$FP" > .last-fingerprint
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add .last-fingerprint
+            git commit -m "chore: update fingerprint to $FP [skip ci]"
+            git push origin main
+          fi
