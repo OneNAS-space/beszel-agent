@@ -42,6 +42,7 @@ define Package/beszel-agent/conffiles
 endef
 
 define Package/beszel-agent/install
+	$(call GoPackage/Package/Install/Bin,$(PKG_INSTALL_DIR))
 	$(INSTALL_DIR) $(1)/usr/bin
 	$(INSTALL_BIN) $(PKG_INSTALL_DIR)/usr/bin/agent $(1)/usr/bin/beszel-agent
 
