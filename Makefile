@@ -1,12 +1,12 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=beszel-agent
-PKG_VERSION:=0.9.1
+PKG_VERSION:=0.18.7
 PKG_RELEASE:=1
 
 PKG_SOURCE:=beszel-$(PKG_VERSION).tar.gz
 PKG_SOURCE_URL:=https://codeload.github.com/henrygd/beszel/tar.gz/v$(PKG_VERSION)?
-PKG_HASH:=1d95096db7d4bf09c7164b4c7be5a73e35aabebec110795c643b2f565b939e7f
+PKG_HASH:=5b0b839faee3c3029f3e44256811ed3736087f5c4892af983918771a13443499
 
 PKG_MAINTAINER:=Jackie264 <OneNAS-space>
 PKG_LICENSE:=MIT
