@@ -19,8 +19,7 @@ PKG_USE_MIPS16:=0
 GO_PKG:=github.com/henrygd/beszel/agent
 
 include $(INCLUDE_DIR)/package.mk
-include $(TOPDIR)/feeds/packages/lang/golang/golang-values.mk
-include $(TOPDIR)/feeds/packages/lang/golang/golang-plugins.mk
+include $(TOPDIR)/feeds/packages/lang/golang/golang-package.mk
 
 define Package/beszel-agent
   SECTION:=net
@@ -37,13 +36,6 @@ endef
 
 define Package/beszel-agent/conffiles
 /etc/config/beszel-agent
-endef
-
-define Build/Compile
-	$(call GoPackage/Build/Compile/Default, \
-		GoPKG="$(GO_PKG)" \
-		GoBinPackage="0" \
-	)
 endef
 
 define Package/beszel-agent/install
