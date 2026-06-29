@@ -13,19 +13,15 @@ PKG_LICENSE:=MIT
 PKG_LICENSE_FILES:=LICENSE
 
 PKG_BUILD_DIR:=$(BUILD_DIR)/beszel-$(PKG_VERSION)
-PKG_BUILD_DEPENDS:=golang/host
-PKG_BUILD_PARALLEL:=1
-PKG_USE_MIPS16:=0
 
 include $(INCLUDE_DIR)/package.mk
-include $(TOPDIR)/feeds/packages/lang/golang/golang-package.mk
 
 define Package/beszel-agent
   SECTION:=net
   CATEGORY:=Network
   TITLE:=Beszel monitoring agent
   URL:=https://beszel.dev
-  DEPENDS:=$(GO_ARCH_DEPENDS)
+  BUILD_DEPENDS:=golang/host
 endef
 
 define Package/beszel-agent/description
@@ -39,7 +35,9 @@ endef
 
 define Build/Compile
 	$(call Go/Compile,$(PKG_BUILD_DIR))
-	$(call Go/Build,$(PKG_BUILD_DIR),./internal/cmd/agent)
+	$(GO_VARS) go build -o $(PKG_BUILD_DIR)/beszel-agent-bin \
+		-ldflags "-s -w" \
+		$(PKG_BUILD_DIR)/internal/cmd/agent
 endef
 
 define Package/beszel-agent/install
