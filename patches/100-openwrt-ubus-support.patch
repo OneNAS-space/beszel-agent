@@ -1,15 +1,15 @@
-From 7c860703b3f5ffdec7d3b4dd07c3d8f4eec95c65 Mon Sep 17 00:00:00 2001
+From 8bc006aefceffe4bee3c69275f13b91180cbde89 Mon Sep 17 00:00:00 2001
 From: Jackie264 <125248570+Jackie264@users.noreply.github.com>
-Date: Fri, 3 Jul 2026 17:39:47 +0800
+Date: Fri, 3 Jul 2026 18:04:00 +0800
 Subject: [PATCH] Modify systemd manager for OpenWrt support
 
-Refactor systemd manager for OpenWrt compatibility by bypassing systemd checks and using ubus for service management.
+Refactored systemd handling for OpenWrt compatibility by bypassing systemd checks and utilizing ubus for service management.
 ---
- agent/systemd.go | 265 +++++++++++++++++------------------------------
- 1 file changed, 94 insertions(+), 171 deletions(-)
+ agent/systemd.go | 268 +++++++++++++++++------------------------------
+ 1 file changed, 97 insertions(+), 171 deletions(-)
 
 diff --git a/agent/systemd.go b/agent/systemd.go
-index 25e20a226..2b7a3711e 100644
+index 25e20a226..f95c7f757 100644
 --- a/agent/systemd.go
 +++ b/agent/systemd.go
 @@ -3,12 +3,11 @@
@@ -121,7 +121,7 @@ index 25e20a226..2b7a3711e 100644
  		sm.Lock()
  		defer sm.Unlock()
  		for _, service := range sm.serviceStatsMap {
-@@ -131,147 +92,118 @@ func (sm *systemdManager) getServiceStats(conn *dbus.Conn, refresh bool) []*syst
+@@ -131,147 +92,121 @@ func (sm *systemdManager) getServiceStats(conn *dbus.Conn, refresh bool) []*syst
  		return services
  	}
  
@@ -232,8 +232,9 @@ index 25e20a226..2b7a3711e 100644
 -		if v, ok := memProp.Value.Value().(uint64); ok && v != math.MaxUint64 {
 -			memUsage = v
 +		if isRunning {
-+			service.State = "active"
-+			service.Sub = "running"
++			// 修复点：添加显式类型转换
++			service.State = systemd.ServiceState("active")
++			service.Sub = systemd.ServiceSubState("running")
 +
 +			if data, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid)); err == nil {
 +				binEnd := strings.LastIndex(string(data), ")")
@@ -254,8 +255,9 @@ index 25e20a226..2b7a3711e 100644
 +				}
 +			}
 +		} else {
-+			service.State = "inactive"
-+			service.Sub = "dead"
++			// 修复点：添加显式类型转换
++			service.State = systemd.ServiceState("inactive")
++			service.Sub = systemd.ServiceSubState("dead")
 +			service.Mem = 0
 +			service.UpdateCPUPercent(0)
  		}
@@ -343,7 +345,8 @@ index 25e20a226..2b7a3711e 100644
 +	if exists {
 +		details["MemoryCurrent"] = service.Mem
 +		details["MemoryPeak"] = service.MemPeak
-+		if service.State == "active" {
++		// 修复点：对自定义类型进行比较时转换类型
++		if service.State == systemd.ServiceState("active") {
 +			details["ActiveState"] = "active"
 +			details["SubState"] = "running"
 +		} else {
@@ -352,7 +355,7 @@ index 25e20a226..2b7a3711e 100644
  		}
  	}
  
-@@ -280,19 +212,10 @@ func (sm *systemdManager) getServiceDetails(serviceName string) (systemd.Service
+@@ -280,19 +215,10 @@ func (sm *systemdManager) getServiceDetails(serviceName string) (systemd.Service
  
  // unescapeServiceName unescapes systemd service names that contain C-style escape sequences like \x2d
  func unescapeServiceName(name string) string {
