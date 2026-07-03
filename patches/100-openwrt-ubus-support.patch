@@ -1,15 +1,15 @@
-From 8bc006aefceffe4bee3c69275f13b91180cbde89 Mon Sep 17 00:00:00 2001
+From 3de03c9d11eab560cdddb7ceecdc399e136887f4 Mon Sep 17 00:00:00 2001
 From: Jackie264 <125248570+Jackie264@users.noreply.github.com>
-Date: Fri, 3 Jul 2026 18:04:00 +0800
-Subject: [PATCH] Modify systemd manager for OpenWrt support
+Date: Fri, 3 Jul 2026 18:28:13 +0800
+Subject: [PATCH] Refactor systemdManager for OpenWrt compatibility
 
-Refactored systemd handling for OpenWrt compatibility by bypassing systemd checks and utilizing ubus for service management.
+Refactor systemdManager to use OpenWrt ubus instead of systemd. Simplify isSystemdAvailable function to always return true.
 ---
  agent/systemd.go | 268 +++++++++++++++++------------------------------
  1 file changed, 97 insertions(+), 171 deletions(-)
 
 diff --git a/agent/systemd.go b/agent/systemd.go
-index 25e20a226..f95c7f757 100644
+index 25e20a226..49c12f3ea 100644
 --- a/agent/systemd.go
 +++ b/agent/systemd.go
 @@ -3,12 +3,11 @@
@@ -232,9 +232,9 @@ index 25e20a226..f95c7f757 100644
 -		if v, ok := memProp.Value.Value().(uint64); ok && v != math.MaxUint64 {
 -			memUsage = v
 +		if isRunning {
-+			// 修复点：添加显式类型转换
-+			service.State = systemd.ServiceState("active")
-+			service.Sub = systemd.ServiceSubState("running")
++			// 【修复点】改用原厂内置的 Parse 函数安全生成内部枚举类型
++			service.State = systemd.ParseServiceStatus("active")
++			service.Sub = systemd.ParseServiceSubState("running")
 +
 +			if data, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid)); err == nil {
 +				binEnd := strings.LastIndex(string(data), ")")
@@ -255,9 +255,9 @@ index 25e20a226..f95c7f757 100644
 +				}
 +			}
 +		} else {
-+			// 修复点：添加显式类型转换
-+			service.State = systemd.ServiceState("inactive")
-+			service.Sub = systemd.ServiceSubState("dead")
++			// 【修复点】改用原厂内置的 Parse 函数安全生成内部枚举类型
++			service.State = systemd.ParseServiceStatus("inactive")
++			service.Sub = systemd.ParseServiceSubState("dead")
 +			service.Mem = 0
 +			service.UpdateCPUPercent(0)
  		}
@@ -345,8 +345,8 @@ index 25e20a226..f95c7f757 100644
 +	if exists {
 +		details["MemoryCurrent"] = service.Mem
 +		details["MemoryPeak"] = service.MemPeak
-+		// 修复点：对自定义类型进行比较时转换类型
-+		if service.State == systemd.ServiceState("active") {
++		// 【修复点】对比时也通过内置 Parse 函数来进行安全的枚举对比
++		if service.State == systemd.ParseServiceStatus("active") {
 +			details["ActiveState"] = "active"
 +			details["SubState"] = "running"
 +		} else {
