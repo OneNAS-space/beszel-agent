@@ -1,5 +1,6 @@
 # beszel-agent
-Lightweight server monitoring agent packaged for OpenWrt
+The lightweight telemetry agent adapted to OpenWrt is used to report system and Docker indicators to your Beszel Hub.
+
 #### (Based on the official source code)
 Automatically synchronize and track the latest version of upstream
 
