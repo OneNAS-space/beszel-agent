@@ -2,7 +2,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=beszel
 PKG_VERSION:=0.18.7
-PKG_RELEASE:=2
+PKG_RELEASE:=3
 
 PKG_SOURCE:=beszel-$(PKG_VERSION).tar.gz
 PKG_SOURCE_URL:=https://codeload.github.com/henrygd/beszel/tar.gz/v$(PKG_VERSION)?
@@ -19,7 +19,7 @@ PKG_USE_MIPS16:=0
 
 GO_PKG:=github.com/henrygd/beszel
 GO_PKG_BUILD_PKG:=$(GO_PKG)/internal/cmd/agent
-GO_PKG_TAGS:=
+GO_PKG_TAGS:=openwrt
 
 include $(INCLUDE_DIR)/package.mk
 include $(TOPDIR)/feeds/packages/lang/golang/golang-package.mk
@@ -35,6 +35,12 @@ endef
 define Package/beszel-agent/description
   Beszel is a lightweight server monitoring hub. 
   This package contains the agent that runs on the monitored system.
+endef
+
+define Build/Prepare
+	$(call Build/Prepare/Default)
+	$(CP) ./files/openwrt_services.go $(PKG_BUILD_DIR)/agent/
+	$(SED) 's|//go:build linux|//go:build linux \&\& !openwrt|' $(PKG_BUILD_DIR)/agent/systemd.go
 endef
 
 define Package/beszel-agent/conffiles
@@ -53,5 +59,5 @@ define Package/beszel-agent/install
 	$(INSTALL_CONF) ./files/beszel-agent.config $(1)/etc/config/beszel-agent
 endef
 
-$(eval $(call BuildPackage,beszel-agent))
+$(eval $(call GoPackage,beszel-agent))
 $(eval $(call BuildPackage,beszel-agent))
