@@ -29,7 +29,7 @@ start_service() {
     FS_LIST=""
     config_list_foreach "main" "extra_filesystems" append_fs
 
-    procd_open_instance
+    procd_open_instance "beszel-agent"
     procd_set_param command "$PROG"
 
     procd_set_param env PORT="$port" HOST_PROC="/proc" HOST_SYS="/sys"
