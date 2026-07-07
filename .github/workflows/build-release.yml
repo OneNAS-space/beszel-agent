@@ -88,12 +88,29 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - version: openwrt-25.12
-            target: x86_64
-          - version: openwrt-25.12
-            target: aarch64_cortex-a53
-          - version: openwrt-25.12
-            target: arm_cortex-a7_neon-vfpv4
+          version: [openwrt-25.12]
+        target:
+          # --- The original 3 architectures (compile and push custom-packages) ---
+          - x86_64
+          - aarch64_cortex-a53
+          - arm_cortex-a7_neon-vfpv4
+          
+          # --- New architecture (only compiled and left in Release) ---
+          - aarch64_generic
+          - aarch64_cortex
+          - arm_cortex-a5_vfpv4
+          - arm_cortex-a7
+          - arm_cortex-a8_vfpv3
+          - arm_cortex-a9
+          - arm_cortex-a9_neon
+          - arm_cortex-a9_vfpv3-d16
+          - arm_cortex-a15_neon-vfpv4
+          - mips_24kc
+          - mips_4kec
+          - mips_mips32
+          - mipsel_24kc
+          - mipsel_74kc
+          - mipsel_mips32
 
     steps:
       - name: 🧾 Checkout repo
@@ -201,6 +218,16 @@ jobs:
           find ./release-assets -type f -name "*.apk" | while read -r f; do
             base=$(basename "$f")
             archdir=$(echo "$f" | sed -E 's#.*/beszel-agent-([^/]+)-openwrt.*#\1#')
+            
+            # Whitelist control: Only these 3 old architectures will be released and deployed to the custom-packages warehouse.
+            case "$archdir" in
+              "x86_64" | "aarch64_cortex-a53" | "arm_cortex-a7_neon-vfpv4")
+                ;;
+              *)
+                echo "⏭️ Skipping deployment to custom-packages repo for architecture: $archdir"
+                continue
+                ;;
+            esac
             
             standard_name=$(echo "$base" | sed "s/-$archdir//")
             pkgname=$(echo "$standard_name" | cut -d- -f1)
