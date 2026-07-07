@@ -110,7 +110,6 @@ jobs:
           - arm_cortex-a9_vfpv3-d16
           - arm_fa526
           - arm_xscale
-          - armeb_xscale
           - mips64_mips64r2
           - mips64_octeonplus
           - mips64el_mips64r2
