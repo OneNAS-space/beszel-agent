@@ -96,7 +96,7 @@ jobs:
           
           # --- New architecture (only compiled and left in Release) ---
           - aarch64_generic
-          - aarch64_cortex
+          - aarch64_cortex-a72
           - arm_cortex-a5_vfpv4
           - arm_cortex-a7
           - arm_cortex-a8_vfpv3
