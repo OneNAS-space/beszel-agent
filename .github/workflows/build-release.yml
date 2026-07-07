@@ -114,11 +114,7 @@ jobs:
           - mips64_mips64r2
           - mips64_octeonplus
           - mips64el_mips64r2
-          - mips_24kc
           - mips_mips32
-          - mipsel_24kc
-          - mipsel_24kc_24kf
-          - mipsel_74kc
           - mipsel_mips32
 
     steps:
