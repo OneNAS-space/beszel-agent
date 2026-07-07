@@ -20,6 +20,7 @@ PKG_USE_MIPS16:=0
 GO_PKG:=github.com/henrygd/beszel
 GO_PKG_BUILD_PKG:=$(GO_PKG)/internal/cmd/agent
 GO_PKG_TAGS:=openwrt
+GO_PKG_ENABLE_CGO:=0
 
 include $(INCLUDE_DIR)/package.mk
 include $(TOPDIR)/feeds/packages/lang/golang/golang-package.mk
