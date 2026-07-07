@@ -87,8 +87,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          version: [openwrt-25.12]
+        version: [openwrt-25.12]
         target:
           # --- The original 3 architectures (compile and push custom-packages) ---
           - x86_64
