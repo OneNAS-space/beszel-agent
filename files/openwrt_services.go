@@ -179,7 +179,7 @@ func (sm *systemdManager) getServiceDetails(serviceName string) (systemd.Service
 	uName := strings.TrimSuffix(serviceName, ".service")
 	initScript := "/etc/init.d/" + uName
 
-	// 1. 获取缓存数据 (用于获取历史峰值或其他元数据)
+	// 1. 获取缓存数据 (用于获取历史内存峰值)
 	sm.Lock()
 	service, exists := sm.serviceStatsMap[serviceName]
 	if !exists {
@@ -187,7 +187,7 @@ func (sm *systemdManager) getServiceDetails(serviceName string) (systemd.Service
 	}
 	sm.Unlock()
 
-	// 初始化默认值
+	// 初始化默认值，防止任何字段出现 N/A
 	details["ActiveState"] = "inactive"
 	details["SubState"] = "dead"
 	details["Result"] = "success"
@@ -196,10 +196,11 @@ func (sm *systemdManager) getServiceDetails(serviceName string) (systemd.Service
 	details["MainPID"] = uint64(0)
 	details["TasksCurrent"] = uint64(0)
 
-	// 2. 实时查询 Ubus 获取状态、PID 和内存 (核心实时探测)
+	// 2. 实时查询 Ubus 获取状态、PID、并发线程数和内存 RSS
 	var isRunningRealTime bool = false
-	cmd := exec.Command("ubus", "call", "service", "list", fmt.Sprintf(`{"name":"%s"}`, uName))
-	out, err := cmd.Output()
+	var currentMem uint64 = 0
+
+	out, err := exec.Command("ubus", "call", "service", "list", fmt.Sprintf(`{"name":"%s"}`, uName)).Output()
 	if err == nil {
 		type UbusInstance struct {
 			Running bool `json:"running"`
@@ -217,20 +218,23 @@ func (sm *systemdManager) getServiceDetails(serviceName string) (systemd.Service
 						if inst.Pid > 0 {
 							details["MainPID"] = uint64(inst.Pid)
 
-							// 精准实时读取内存 (RSS)
+							// 【核心修复】精准实时读取内存 (RSS)
 							if data, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", inst.Pid)); err == nil {
 								binEnd := strings.LastIndex(string(data), ")")
 								if binEnd != -1 && len(string(data)) > binEnd+2 {
 									fields := strings.Fields(string(data)[binEnd+2:])
 									if len(fields) > 21 {
 										pageSize := uint64(os.Getpagesize())
+										if pageSize == 0 {
+											pageSize = 4096
+										}
 										rss, _ := strconv.ParseUint(fields[21], 10, 64)
-										details["MemoryCurrent"] = rss * pageSize
+										currentMem = rss * pageSize
 									}
 								}
 							}
 
-							// 读取线程数
+							// 精准实时读取线程数 (Tasks)
 							if data, err := os.ReadFile(fmt.Sprintf("/proc/%d/status", inst.Pid)); err == nil {
 								lines := strings.Split(string(data), "\n")
 								for _, line := range lines {
@@ -244,6 +248,7 @@ func (sm *systemdManager) getServiceDetails(serviceName string) (systemd.Service
 									}
 								}
 							}
+							break // 找到主实例后跳出循环
 						}
 					}
 				}
@@ -251,25 +256,25 @@ func (sm *systemdManager) getServiceDetails(serviceName string) (systemd.Service
 		}
 	}
 
-	// 3. 状态校准与峰值计算
+	// 3. 核心指标状态校准与内存峰值计算
 	if isRunningRealTime {
 		details["ActiveState"] = "active"
 		details["SubState"] = "running"
-		details["Result"] = "success"
+		details["MemoryCurrent"] = currentMem
 		
-		// 峰值逻辑：如果缓存存在且缓存的峰值更高，则使用缓存，否则使用当前内存
-		if exists && service.MemPeak > details["MemoryCurrent"].(uint64) {
+		// 结合缓存计算最高内存峰值
+		if exists && service.MemPeak > currentMem {
 			details["MemoryPeak"] = service.MemPeak
 		} else {
-			details["MemoryPeak"] = details["MemoryCurrent"]
+			details["MemoryPeak"] = currentMem
 		}
 	} else if exists {
-		// 如果实时没查到，但缓存里有数据，可以保持历史内存，状态置为 inactive
+		// 如果服务此刻恰好挂了，但缓存有历史数据，则显示历史遗留内存
 		details["MemoryCurrent"] = service.Mem
 		details["MemoryPeak"] = service.MemPeak
 	}
 
-	// 4. 补全元数据
+	// 4. 补全完整的 Systemd 兼容元数据
 	details["Id"] = serviceName
 	details["Description"] = uName + " (OpenWrt Procd)"
 	details["LoadState"] = "loaded"
@@ -277,6 +282,7 @@ func (sm *systemdManager) getServiceDetails(serviceName string) (systemd.Service
 	details["NRestarts"] = uint64(0)
 	details["StatusText"] = ""
 
+	// 检测服务开机自启状态
 	unitFileState := "disabled"
 	if info, err := os.Stat(initScript); err == nil && !info.Mode().IsDir() {
 		if err := exec.Command(initScript, "enabled").Run(); err == nil {
@@ -285,6 +291,7 @@ func (sm *systemdManager) getServiceDetails(serviceName string) (systemd.Service
 	}
 	details["UnitFileState"] = unitFileState
 
+	// 动态检测服务控制能力 (Capabilities)
 	canStart, canStop, canReload := false, false, false
 	if info, err := os.Stat(initScript); err == nil && !info.Mode().IsDir() {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
