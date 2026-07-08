@@ -3,6 +3,7 @@
 package agent
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -173,15 +174,98 @@ func (sm *systemdManager) updateServiceStats(conn *dbus.Conn, unit dbus.UnitStat
 	return nil, nil
 }
 
+// --- Core revision area: provide all the parameters required by the front-end details panel ---
 func (sm *systemdManager) getServiceDetails(serviceName string) (systemd.ServiceDetails, error) {
 	details := make(systemd.ServiceDetails)
+	
+	// serviceName has the suffix ".service". We remove it to match the OpenWrt service name.
+	uName := strings.TrimSuffix(serviceName, ".service")
+
+	// 1. Basic metadata (N/A of Name, Description, Load state, Unit file)
+	details["Id"] = serviceName
+	details["Description"] = uName + " (OpenWrt Procd)"
+	details["LoadState"] = "loaded"
+	details["FragmentPath"] = "/etc/init.d/" + uName
+	details["NRestarts"] = nil
+
+	// 2. Rigorously acquire service ability (Capabilities)
+	canStart, canStop, canReload := false, false, false
+	initScript := "/etc/init.d/" + uName
+	
+	// Check whether the script exists and is executable
+	if info, err := os.Stat(initScript); err == nil && !info.Mode().IsDir() {
+		// Defensive programming: add a 2-second timeout to command execution to prevent abnormal scripts from hanging Agent
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		
+		out, _ := exec.CommandContext(ctx, initScript).CombinedOutput()
+		outputStr := strings.ToLower(string(out))
+		
+		// Only when these words are clearly included in the output help information can the corresponding ability be given.
+		if strings.Contains(outputStr, "start") {
+			canStart = true
+		}
+		if strings.Contains(outputStr, "stop") {
+			canStop = true
+		}
+		if strings.Contains(outputStr, "reload") {
+			canReload = true
+		}
+	}
+	
+	details["CanStart"] = canStart
+	details["CanStop"] = canStop
+	details["CanReload"] = canReload
+
+	// 3. Real-time query Ubus to get the current PID
+	out, err := exec.Command("ubus", "call", "service", "list").Output()
+	if err == nil {
+		type UbusInstance struct {
+			Running bool `json:"running"`
+			Pid     int  `json:"pid"`
+		}
+		type UbusService struct {
+			Instances map[string]UbusInstance `json:"instances"`
+		}
+		var ubusData map[string]UbusService
+		if json.Unmarshal(out, &ubusData) == nil {
+			if sData, ok := ubusData[uName]; ok {
+				for _, inst := range sData.Instances {
+					if inst.Running && inst.Pid > 0 {
+						// Eliminate the N/A of Main PID
+						details["MainPID"] = uint64(inst.Pid)
+						
+						// Read the number of threads through /proc/<pid>/status to eliminate the N/A of Tasks
+						if data, err := os.ReadFile(fmt.Sprintf("/proc/%d/status", inst.Pid)); err == nil {
+							lines := strings.Split(string(data), "\n")
+							for _, line := range lines {
+								if strings.HasPrefix(line, "Threads:") {
+									fields := strings.Fields(line)
+									if len(fields) >= 2 {
+										tasks, _ := strconv.ParseUint(fields[1], 10, 64)
+										details["TasksCurrent"] = tasks
+									}
+									break
+								}
+							}
+						}
+						break
+					}
+				}
+			}
+		}
+	}
+
+	// 4. Get the memory and running status from the cache
 	sm.Lock()
 	service, exists := sm.serviceStatsMap[serviceName]
 	sm.Unlock()
 
 	if exists {
+		// Eliminate the N/A of Memory
 		details["MemoryCurrent"] = service.Mem
 		details["MemoryPeak"] = service.MemPeak
+		
 		if service.State == systemd.ParseServiceStatus("active") {
 			details["ActiveState"] = "active"
 			details["SubState"] = "running"
@@ -189,6 +273,9 @@ func (sm *systemdManager) getServiceDetails(serviceName string) (systemd.Service
 			details["ActiveState"] = "inactive"
 			details["SubState"] = "dead"
 		}
+	} else {
+		details["ActiveState"] = "inactive"
+		details["SubState"] = "dead"
 	}
 
 	return details, nil
