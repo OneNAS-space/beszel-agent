@@ -174,109 +174,75 @@ func (sm *systemdManager) updateServiceStats(conn *dbus.Conn, unit dbus.UnitStat
 	return nil, nil
 }
 
-// --- Core revision area: provide all the parameters required by the front-end details panel ---
+// --- 核心修订区：回归 Systemd 原生语义，复用缓存逻辑 ---
 func (sm *systemdManager) getServiceDetails(serviceName string) (systemd.ServiceDetails, error) {
 	details := make(systemd.ServiceDetails)
 	
-	// serviceName has the suffix ".service". We remove it to match the OpenWrt service name.
+	// 基础配置
 	uName := strings.TrimSuffix(serviceName, ".service")
+	initScript := "/etc/init.d/" + uName
 
-	// 1. Basic metadata (N/A of Name, Description, Load state, Unit file)
+	// 1. 优先从缓存获取已有的运行时数据 (复用列表页逻辑)
+	sm.Lock()
+	service, exists := sm.serviceStatsMap[serviceName]
+	sm.Unlock()
+
+	// 初始化状态 (默认 inactive/dead)
+	details["ActiveState"] = "inactive"
+	details["SubState"] = "dead"
+	details["MemoryCurrent"] = uint64(0)
+	details["MemoryPeak"] = uint64(0)
+	details["Result"] = "success" // 默认正常
+
+	if exists {
+		// 关键修正：使用枚举的 String() 方法，得到 "active", "running" 等原生格式
+		details["ActiveState"] = service.State.String()
+		details["SubState"] = service.Sub.String()
+		
+		details["MemoryCurrent"] = service.Mem
+		details["MemoryPeak"] = service.MemPeak
+		
+		// 如果 service 是 active，result 默认为 success
+		if service.State == systemd.ParseServiceStatus("active") {
+			details["Result"] = "success"
+		}
+	}
+
+	// 2. 补全元数据
 	details["Id"] = serviceName
 	details["Description"] = uName + " (OpenWrt Procd)"
 	details["LoadState"] = "loaded"
-	details["FragmentPath"] = "/etc/init.d/" + uName
-	details["NRestarts"] = nil
+	details["FragmentPath"] = initScript
+	details["NRestarts"] = uint64(0)
+	details["StatusText"] = ""
 
-	// 2. Rigorously acquire service ability (Capabilities)
-	canStart, canStop, canReload := false, false, false
-	initScript := "/etc/init.d/" + uName
-	
-	// Check whether the script exists and is executable
+	// 3. 获取 Boot state (开机自启状态)
+	unitFileState := "disabled"
 	if info, err := os.Stat(initScript); err == nil && !info.Mode().IsDir() {
-		// Defensive programming: add a 2-second timeout to command execution to prevent abnormal scripts from hanging Agent
+		// OpenWrt 的 "enabled" 检查
+		if err := exec.Command(initScript, "enabled").Run(); err == nil {
+			unitFileState = "enabled"
+		}
+	}
+	details["UnitFileState"] = unitFileState
+
+	// 4. 动态获取服务能力 (Capabilities)
+	canStart, canStop, canReload := false, false, false
+	if info, err := os.Stat(initScript); err == nil && !info.Mode().IsDir() {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 		
 		out, _ := exec.CommandContext(ctx, initScript).CombinedOutput()
 		outputStr := strings.ToLower(string(out))
 		
-		// Only when these words are clearly included in the output help information can the corresponding ability be given.
-		if strings.Contains(outputStr, "start") {
-			canStart = true
-		}
-		if strings.Contains(outputStr, "stop") {
-			canStop = true
-		}
-		if strings.Contains(outputStr, "reload") {
-			canReload = true
-		}
+		// 只要脚本输出包含关键字，即判定为支持
+		if strings.Contains(outputStr, "start") { canStart = true }
+		if strings.Contains(outputStr, "stop") { canStop = true }
+		if strings.Contains(outputStr, "reload") { canReload = true }
 	}
-	
 	details["CanStart"] = canStart
 	details["CanStop"] = canStop
 	details["CanReload"] = canReload
-
-	// 3. Real-time query Ubus to get the current PID
-	out, err := exec.Command("ubus", "call", "service", "list").Output()
-	if err == nil {
-		type UbusInstance struct {
-			Running bool `json:"running"`
-			Pid     int  `json:"pid"`
-		}
-		type UbusService struct {
-			Instances map[string]UbusInstance `json:"instances"`
-		}
-		var ubusData map[string]UbusService
-		if json.Unmarshal(out, &ubusData) == nil {
-			if sData, ok := ubusData[uName]; ok {
-				for _, inst := range sData.Instances {
-					if inst.Running && inst.Pid > 0 {
-						// Eliminate the N/A of Main PID
-						details["MainPID"] = uint64(inst.Pid)
-						
-						// Read the number of threads through /proc/<pid>/status to eliminate the N/A of Tasks
-						if data, err := os.ReadFile(fmt.Sprintf("/proc/%d/status", inst.Pid)); err == nil {
-							lines := strings.Split(string(data), "\n")
-							for _, line := range lines {
-								if strings.HasPrefix(line, "Threads:") {
-									fields := strings.Fields(line)
-									if len(fields) >= 2 {
-										tasks, _ := strconv.ParseUint(fields[1], 10, 64)
-										details["TasksCurrent"] = tasks
-									}
-									break
-								}
-							}
-						}
-						break
-					}
-				}
-			}
-		}
-	}
-
-	// 4. Get the memory and running status from the cache
-	sm.Lock()
-	service, exists := sm.serviceStatsMap[serviceName]
-	sm.Unlock()
-
-	if exists {
-		// Eliminate the N/A of Memory
-		details["MemoryCurrent"] = service.Mem
-		details["MemoryPeak"] = service.MemPeak
-		
-		if service.State == systemd.ParseServiceStatus("active") {
-			details["ActiveState"] = "active"
-			details["SubState"] = "running"
-		} else {
-			details["ActiveState"] = "inactive"
-			details["SubState"] = "dead"
-		}
-	} else {
-		details["ActiveState"] = "inactive"
-		details["SubState"] = "dead"
-	}
 
 	return details, nil
 }
