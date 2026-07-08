@@ -174,7 +174,7 @@ func (sm *systemdManager) updateServiceStats(conn *dbus.Conn, unit dbus.UnitStat
 	return nil, nil
 }
 
-// --- 核心修订区：回归 Systemd 原生语义，复用缓存逻辑 ---
+// --- 核心修订区：移除幻觉代码，使用朴素判断复用缓存 ---
 func (sm *systemdManager) getServiceDetails(serviceName string) (systemd.ServiceDetails, error) {
 	details := make(systemd.ServiceDetails)
 	
@@ -182,30 +182,32 @@ func (sm *systemdManager) getServiceDetails(serviceName string) (systemd.Service
 	uName := strings.TrimSuffix(serviceName, ".service")
 	initScript := "/etc/init.d/" + uName
 
-	// 1. 优先从缓存获取已有的运行时数据 (复用列表页逻辑)
+	// 1. 优先从缓存获取已有的运行时数据
 	sm.Lock()
 	service, exists := sm.serviceStatsMap[serviceName]
 	sm.Unlock()
 
-	// 初始化状态 (默认 inactive/dead)
+	// 初始化默认状态
 	details["ActiveState"] = "inactive"
 	details["SubState"] = "dead"
 	details["MemoryCurrent"] = uint64(0)
 	details["MemoryPeak"] = uint64(0)
-	details["Result"] = "success" // 默认正常
+	details["Result"] = "success" 
 
 	if exists {
-		// 关键修正：使用枚举的 String() 方法，得到 "active", "running" 等原生格式
-		details["ActiveState"] = service.State.String()
-		details["SubState"] = service.Sub.String()
+		// 🔴 修正：彻底移除臆想的 .String()，直接通过比对状态枚举来硬编码字符串
+		if service.State == systemd.ParseServiceStatus("active") {
+			details["ActiveState"] = "active"
+			details["SubState"] = "running"
+			details["Result"] = "success"
+		} else {
+			details["ActiveState"] = "inactive"
+			details["SubState"] = "dead"
+			details["Result"] = "success"
+		}
 		
 		details["MemoryCurrent"] = service.Mem
 		details["MemoryPeak"] = service.MemPeak
-		
-		// 如果 service 是 active，result 默认为 success
-		if service.State == systemd.ParseServiceStatus("active") {
-			details["Result"] = "success"
-		}
 	}
 
 	// 2. 补全元数据
@@ -219,7 +221,7 @@ func (sm *systemdManager) getServiceDetails(serviceName string) (systemd.Service
 	// 3. 获取 Boot state (开机自启状态)
 	unitFileState := "disabled"
 	if info, err := os.Stat(initScript); err == nil && !info.Mode().IsDir() {
-		// OpenWrt 的 "enabled" 检查
+		// 依赖退出码 (Exit Code) 判断，0 即为 enabled
 		if err := exec.Command(initScript, "enabled").Run(); err == nil {
 			unitFileState = "enabled"
 		}
@@ -235,7 +237,6 @@ func (sm *systemdManager) getServiceDetails(serviceName string) (systemd.Service
 		out, _ := exec.CommandContext(ctx, initScript).CombinedOutput()
 		outputStr := strings.ToLower(string(out))
 		
-		// 只要脚本输出包含关键字，即判定为支持
 		if strings.Contains(outputStr, "start") { canStart = true }
 		if strings.Contains(outputStr, "stop") { canStop = true }
 		if strings.Contains(outputStr, "reload") { canReload = true }
