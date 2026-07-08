@@ -179,7 +179,7 @@ func (sm *systemdManager) getServiceDetails(serviceName string) (systemd.Service
 	uName := strings.TrimSuffix(serviceName, ".service")
 	initScript := "/etc/init.d/" + uName
 
-	// 1. 获取缓存数据 (内存数据等依然可以从缓存取)
+	// 1. 获取缓存数据 (用于获取历史峰值或其他元数据)
 	sm.Lock()
 	service, exists := sm.serviceStatsMap[serviceName]
 	if !exists {
@@ -193,16 +193,13 @@ func (sm *systemdManager) getServiceDetails(serviceName string) (systemd.Service
 	details["Result"] = "success"
 	details["MemoryCurrent"] = uint64(0)
 	details["MemoryPeak"] = uint64(0)
-	if exists {
-		details["MemoryCurrent"] = service.Mem
-		details["MemoryPeak"] = service.MemPeak
-	}
+	details["MainPID"] = uint64(0)
+	details["TasksCurrent"] = uint64(0)
 
-	// 2. 实时查询 Ubus 获取 PID 和状态 (完全复用你验证过的逻辑)
-	// 我们在这里增加一个标识：isRunningRealTime
-	var isRunningRealTime bool = false 
-
-	out, err := exec.Command("ubus", "call", "service", "list", fmt.Sprintf(`{"name":"%s"}`, uName)).Output()
+	// 2. 实时查询 Ubus 获取状态、PID 和内存 (核心实时探测)
+	var isRunningRealTime bool = false
+	cmd := exec.Command("ubus", "call", "service", "list", fmt.Sprintf(`{"name":"%s"}`, uName))
+	out, err := cmd.Output()
 	if err == nil {
 		type UbusInstance struct {
 			Running bool `json:"running"`
@@ -216,9 +213,23 @@ func (sm *systemdManager) getServiceDetails(serviceName string) (systemd.Service
 			if sData, ok := ubusData[uName]; ok {
 				for _, inst := range sData.Instances {
 					if inst.Running {
-						isRunningRealTime = true // 只要有一个实例在运行，就标记为 true
+						isRunningRealTime = true
 						if inst.Pid > 0 {
 							details["MainPID"] = uint64(inst.Pid)
+
+							// 精准实时读取内存 (RSS)
+							if data, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", inst.Pid)); err == nil {
+								binEnd := strings.LastIndex(string(data), ")")
+								if binEnd != -1 && len(string(data)) > binEnd+2 {
+									fields := strings.Fields(string(data)[binEnd+2:])
+									if len(fields) > 21 {
+										pageSize := uint64(os.Getpagesize())
+										rss, _ := strconv.ParseUint(fields[21], 10, 64)
+										details["MemoryCurrent"] = rss * pageSize
+									}
+								}
+							}
+
 							// 读取线程数
 							if data, err := os.ReadFile(fmt.Sprintf("/proc/%d/status", inst.Pid)); err == nil {
 								lines := strings.Split(string(data), "\n")
@@ -240,18 +251,25 @@ func (sm *systemdManager) getServiceDetails(serviceName string) (systemd.Service
 		}
 	}
 
-	// 3. 关键修正：用实时的 isRunningRealTime 覆盖缓存状态
+	// 3. 状态校准与峰值计算
 	if isRunningRealTime {
 		details["ActiveState"] = "active"
 		details["SubState"] = "running"
 		details["Result"] = "success"
+		
+		// 峰值逻辑：如果缓存存在且缓存的峰值更高，则使用缓存，否则使用当前内存
+		if exists && service.MemPeak > details["MemoryCurrent"].(uint64) {
+			details["MemoryPeak"] = service.MemPeak
+		} else {
+			details["MemoryPeak"] = details["MemoryCurrent"]
+		}
+	} else if exists {
+		// 如果实时没查到，但缓存里有数据，可以保持历史内存，状态置为 inactive
+		details["MemoryCurrent"] = service.Mem
+		details["MemoryPeak"] = service.MemPeak
 	}
-	
-	// 确保 PID/Tasks 即使没取到也不要是空的
-	if _, ok := details["MainPID"]; !ok { details["MainPID"] = uint64(0) }
-	if _, ok := details["TasksCurrent"]; !ok { details["TasksCurrent"] = uint64(0) }
 
-	// 4. 补全其他元数据 (FragmentPath, Boot state, Capabilities)
+	// 4. 补全元数据
 	details["Id"] = serviceName
 	details["Description"] = uName + " (OpenWrt Procd)"
 	details["LoadState"] = "loaded"
