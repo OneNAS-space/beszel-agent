@@ -174,7 +174,55 @@ func (sm *systemdManager) updateServiceStats(conn *dbus.Conn, unit dbus.UnitStat
 	return nil, nil
 }
 
-// --- 核心修订区：移除幻觉代码，使用朴素判断复用缓存 ---
+// getProcdServiceMetrics 动态获取 procd 服务的真实 PID 和并发 Task 数量
+func getProcdServiceMetrics(uName string) (uint64, uint64) {
+	// 1. 定向查询：绝不拉取全局数据，将系统开销降到最低 (取自新版)
+	cmd := exec.Command("ubus", "call", "service", "list", fmt.Sprintf(`{"name":"%s"}`, uName))
+	out, err := cmd.Output()
+	if err != nil {
+		return 0, 0
+	}
+
+	// 2. 强类型解析：告别脆弱的类型断言，安全且优雅 (取自旧版)
+	type UbusInstance struct {
+		Running bool `json:"running"`
+		Pid     int  `json:"pid"`
+	}
+	type UbusService struct {
+		Instances map[string]UbusInstance `json:"instances"`
+	}
+	
+	var ubusData map[string]UbusService
+	if err := json.Unmarshal(out, &ubusData); err != nil {
+		return 0, 0
+	}
+
+	// 提取 Main PID
+	var mainPid int
+	if sData, ok := ubusData[uName]; ok {
+		for _, inst := range sData.Instances {
+			if inst.Running && inst.Pid > 0 {
+				mainPid = inst.Pid
+				break
+			}
+		}
+	}
+
+	if mainPid == 0 {
+		return 0, 0 // 服务未运行
+	}
+
+	// 3. 计算并发 Tasks：直接读取 task 目录项数量，避免字符串切割开销 (取自新版)
+	var taskCount uint64 = 1
+	taskDir := fmt.Sprintf("/proc/%d/task", mainPid)
+	if entries, err := os.ReadDir(taskDir); err == nil {
+		taskCount = uint64(len(entries))
+	}
+
+	return uint64(mainPid), taskCount
+}
+
+// --- 核心修订区：纯净、专业的详情获取逻辑 ---
 func (sm *systemdManager) getServiceDetails(serviceName string) (systemd.ServiceDetails, error) {
 	details := make(systemd.ServiceDetails)
 	
@@ -182,35 +230,37 @@ func (sm *systemdManager) getServiceDetails(serviceName string) (systemd.Service
 	uName := strings.TrimSuffix(serviceName, ".service")
 	initScript := "/etc/init.d/" + uName
 
-	// 1. 优先从缓存获取已有的运行时数据
+	// 1. 优先从缓存获取已有的运行状态 (CPU/MEM)
 	sm.Lock()
 	service, exists := sm.serviceStatsMap[serviceName]
+	if !exists {
+		service, exists = sm.serviceStatsMap[uName]
+	}
 	sm.Unlock()
 
-	// 初始化默认状态
-	details["ActiveState"] = "inactive"
-	details["SubState"] = "dead"
-	details["MemoryCurrent"] = uint64(0)
-	details["MemoryPeak"] = uint64(0)
-	details["Result"] = "success" 
+	// 2. 动态获取真实的 PID 和 Tasks
+	realPid, realTasks := getProcdServiceMetrics(uName)
 
-	if exists {
-		// 🔴 修正：彻底移除臆想的 .String()，直接通过比对状态枚举来硬编码字符串
-		if service.State == systemd.ParseServiceStatus("active") {
-			details["ActiveState"] = "active"
-			details["SubState"] = "running"
-			details["Result"] = "success"
-		} else {
-			details["ActiveState"] = "inactive"
-			details["SubState"] = "dead"
-			details["Result"] = "success"
-		}
-		
+	// 3. 严谨的状态赋值
+	if exists && service.State == systemd.ParseServiceStatus("active") {
+		details["ActiveState"] = "active"
+		details["SubState"] = "running"
+		details["Result"] = "success"
 		details["MemoryCurrent"] = service.Mem
 		details["MemoryPeak"] = service.MemPeak
+	} else {
+		details["ActiveState"] = "inactive"
+		details["SubState"] = "dead"
+		details["Result"] = "success"
+		details["MemoryCurrent"] = uint64(0)
+		details["MemoryPeak"] = uint64(0)
 	}
 
-	// 2. 补全元数据
+	// 填入真实的系统数据
+	details["MainPID"] = realPid
+	details["TasksCurrent"] = realTasks
+
+	// 4. 补全元数据
 	details["Id"] = serviceName
 	details["Description"] = uName + " (OpenWrt Procd)"
 	details["LoadState"] = "loaded"
@@ -218,17 +268,16 @@ func (sm *systemdManager) getServiceDetails(serviceName string) (systemd.Service
 	details["NRestarts"] = uint64(0)
 	details["StatusText"] = ""
 
-	// 3. 获取 Boot state (开机自启状态)
+	// 5. 获取 Boot state (开机自启状态)
 	unitFileState := "disabled"
 	if info, err := os.Stat(initScript); err == nil && !info.Mode().IsDir() {
-		// 依赖退出码 (Exit Code) 判断，0 即为 enabled
 		if err := exec.Command(initScript, "enabled").Run(); err == nil {
 			unitFileState = "enabled"
 		}
 	}
 	details["UnitFileState"] = unitFileState
 
-	// 4. 动态获取服务能力 (Capabilities)
+	// 6. 动态获取服务能力 (Capabilities)
 	canStart, canStop, canReload := false, false, false
 	if info, err := os.Stat(initScript); err == nil && !info.Mode().IsDir() {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
