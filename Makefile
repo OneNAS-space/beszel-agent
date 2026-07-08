@@ -2,7 +2,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=beszel
 PKG_VERSION:=0.18.7
-PKG_RELEASE:=6
+PKG_RELEASE:=7
 
 PKG_SOURCE:=beszel-$(PKG_VERSION).tar.gz
 PKG_SOURCE_URL:=https://codeload.github.com/henrygd/beszel/tar.gz/v$(PKG_VERSION)?
