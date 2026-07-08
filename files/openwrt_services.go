@@ -179,7 +179,7 @@ func (sm *systemdManager) getServiceDetails(serviceName string) (systemd.Service
 	uName := strings.TrimSuffix(serviceName, ".service")
 	initScript := "/etc/init.d/" + uName
 
-	// 1. 获取缓存数据 (复用已验证的缓存逻辑)
+	// 1. 获取缓存数据 (内存数据等依然可以从缓存取)
 	sm.Lock()
 	service, exists := sm.serviceStatsMap[serviceName]
 	if !exists {
@@ -187,29 +187,21 @@ func (sm *systemdManager) getServiceDetails(serviceName string) (systemd.Service
 	}
 	sm.Unlock()
 
-	// 2. 状态映射 (完全信任缓存中的 State)
+	// 初始化默认值
+	details["ActiveState"] = "inactive"
+	details["SubState"] = "dead"
+	details["Result"] = "success"
+	details["MemoryCurrent"] = uint64(0)
+	details["MemoryPeak"] = uint64(0)
 	if exists {
 		details["MemoryCurrent"] = service.Mem
 		details["MemoryPeak"] = service.MemPeak
-		if service.State == systemd.ParseServiceStatus("active") {
-			details["ActiveState"] = "active"
-			details["SubState"] = "running"
-			details["Result"] = "success"
-		} else {
-			details["ActiveState"] = "inactive"
-			details["SubState"] = "dead"
-			details["Result"] = "success"
-		}
-	} else {
-		details["ActiveState"] = "inactive"
-		details["SubState"] = "dead"
-		details["Result"] = "success"
-		details["MemoryCurrent"] = uint64(0)
-		details["MemoryPeak"] = uint64(0)
 	}
 
-	// 3. 实时查询 PID 和 Tasks (完全复用你验证过的逻辑)
-	// 使用定向查询参数 {"name":"uName"} 避免全量拉取
+	// 2. 实时查询 Ubus 获取 PID 和状态 (完全复用你验证过的逻辑)
+	// 我们在这里增加一个标识：isRunningRealTime
+	var isRunningRealTime bool = false 
+
 	out, err := exec.Command("ubus", "call", "service", "list", fmt.Sprintf(`{"name":"%s"}`, uName)).Output()
 	if err == nil {
 		type UbusInstance struct {
@@ -223,34 +215,43 @@ func (sm *systemdManager) getServiceDetails(serviceName string) (systemd.Service
 		if json.Unmarshal(out, &ubusData) == nil {
 			if sData, ok := ubusData[uName]; ok {
 				for _, inst := range sData.Instances {
-					if inst.Running && inst.Pid > 0 {
-						details["MainPID"] = uint64(inst.Pid)
-						// 读取线程数
-						if data, err := os.ReadFile(fmt.Sprintf("/proc/%d/status", inst.Pid)); err == nil {
-							lines := strings.Split(string(data), "\n")
-							for _, line := range lines {
-								if strings.HasPrefix(line, "Threads:") {
-									fields := strings.Fields(line)
-									if len(fields) >= 2 {
-										tasks, _ := strconv.ParseUint(fields[1], 10, 64)
-										details["TasksCurrent"] = tasks
+					if inst.Running {
+						isRunningRealTime = true // 只要有一个实例在运行，就标记为 true
+						if inst.Pid > 0 {
+							details["MainPID"] = uint64(inst.Pid)
+							// 读取线程数
+							if data, err := os.ReadFile(fmt.Sprintf("/proc/%d/status", inst.Pid)); err == nil {
+								lines := strings.Split(string(data), "\n")
+								for _, line := range lines {
+									if strings.HasPrefix(line, "Threads:") {
+										fields := strings.Fields(line)
+										if len(fields) >= 2 {
+											tasks, _ := strconv.ParseUint(fields[1], 10, 64)
+											details["TasksCurrent"] = tasks
+										}
+										break
 									}
-									break
 								}
 							}
 						}
-						break
 					}
 				}
 			}
 		}
 	}
-    
-    // 如果没有查到 PID/Tasks，显式给 0，防止前端 N/A
-    if _, ok := details["MainPID"]; !ok { details["MainPID"] = uint64(0) }
-    if _, ok := details["TasksCurrent"]; !ok { details["TasksCurrent"] = uint64(0) }
 
-	// 4. 补全其他元数据 (保持原有逻辑)
+	// 3. 关键修正：用实时的 isRunningRealTime 覆盖缓存状态
+	if isRunningRealTime {
+		details["ActiveState"] = "active"
+		details["SubState"] = "running"
+		details["Result"] = "success"
+	}
+	
+	// 确保 PID/Tasks 即使没取到也不要是空的
+	if _, ok := details["MainPID"]; !ok { details["MainPID"] = uint64(0) }
+	if _, ok := details["TasksCurrent"]; !ok { details["TasksCurrent"] = uint64(0) }
+
+	// 4. 补全其他元数据 (FragmentPath, Boot state, Capabilities)
 	details["Id"] = serviceName
 	details["Description"] = uName + " (OpenWrt Procd)"
 	details["LoadState"] = "loaded"
