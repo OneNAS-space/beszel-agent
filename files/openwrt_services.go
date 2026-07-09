@@ -152,8 +152,8 @@ func (sm *systemdManager) getServiceStats(conn *dbus.Conn, refresh bool) []*syst
 				}
 			}
 		} else {
-			service.State = systemd.ParseServiceStatus("inactive")
-			service.Sub = systemd.ParseServiceSubState("dead")
+			service.State = systemd.ParseServiceStatus("active")
+			service.Sub = systemd.ParseServiceSubState("exited")
 			service.Mem = 0
 			service.UpdateCPUPercent(0)
 		}
@@ -179,7 +179,7 @@ func (sm *systemdManager) getServiceDetails(serviceName string) (systemd.Service
 	uName := strings.TrimSuffix(serviceName, ".service")
 	initScript := "/etc/init.d/" + uName
 
-	// 1. 获取缓存数据 (用于获取历史内存峰值)
+	// 1. Get cache data (used to obtain historical memory peaks)
 	sm.Lock()
 	service, exists := sm.serviceStatsMap[serviceName]
 	if !exists {
@@ -187,7 +187,7 @@ func (sm *systemdManager) getServiceDetails(serviceName string) (systemd.Service
 	}
 	sm.Unlock()
 
-	// 初始化默认值，防止任何字段出现 N/A
+	// Initialize the default value
 	details["ActiveState"] = "inactive"
 	details["SubState"] = "dead"
 	details["Result"] = "success"
@@ -196,7 +196,8 @@ func (sm *systemdManager) getServiceDetails(serviceName string) (systemd.Service
 	details["MainPID"] = uint64(0)
 	details["TasksCurrent"] = uint64(0)
 
-	// 2. 实时查询 Ubus 获取状态、PID、并发线程数和内存 RSS
+	// 2. Real-time query Ubus to get the status, PID, number of concurrent threads and memory RSS
+	var isLoadedInProcd bool = false
 	var isRunningRealTime bool = false
 	var currentMem uint64 = 0
 
@@ -212,13 +213,14 @@ func (sm *systemdManager) getServiceDetails(serviceName string) (systemd.Service
 		var ubusData map[string]UbusService
 		if json.Unmarshal(out, &ubusData) == nil {
 			if sData, ok := ubusData[uName]; ok {
+				isLoadedInProcd = true
 				for _, inst := range sData.Instances {
 					if inst.Running {
 						isRunningRealTime = true
 						if inst.Pid > 0 {
 							details["MainPID"] = uint64(inst.Pid)
 
-							// 【核心修复】精准实时读取内存 (RSS)
+							// Accurate real-time reading of memory (RSS)
 							if data, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", inst.Pid)); err == nil {
 								binEnd := strings.LastIndex(string(data), ")")
 								if binEnd != -1 && len(string(data)) > binEnd+2 {
@@ -234,7 +236,7 @@ func (sm *systemdManager) getServiceDetails(serviceName string) (systemd.Service
 								}
 							}
 
-							// 精准实时读取线程数 (Tasks)
+							// Accurately read the number of threads in real time (Tasks)
 							if data, err := os.ReadFile(fmt.Sprintf("/proc/%d/status", inst.Pid)); err == nil {
 								lines := strings.Split(string(data), "\n")
 								for _, line := range lines {
@@ -248,7 +250,7 @@ func (sm *systemdManager) getServiceDetails(serviceName string) (systemd.Service
 									}
 								}
 							}
-							break // 找到主实例后跳出循环
+							break
 						}
 					}
 				}
@@ -256,25 +258,30 @@ func (sm *systemdManager) getServiceDetails(serviceName string) (systemd.Service
 		}
 	}
 
-	// 3. 核心指标状态校准与内存峰值计算
+	// 3. Core indicator status calibration and memory peak calculation
 	if isRunningRealTime {
 		details["ActiveState"] = "active"
 		details["SubState"] = "running"
 		details["MemoryCurrent"] = currentMem
 		
-		// 结合缓存计算最高内存峰值
 		if exists && service.MemPeak > currentMem {
 			details["MemoryPeak"] = service.MemPeak
 		} else {
 			details["MemoryPeak"] = currentMem
 		}
-	} else if exists {
-		// 如果服务此刻恰好挂了，但缓存有历史数据，则显示历史遗留内存
-		details["MemoryCurrent"] = service.Mem
-		details["MemoryPeak"] = service.MemPeak
+	} else if isLoadedInProcd {
+		details["ActiveState"] = "active"
+		details["SubState"] = "exited"
+		details["MemoryCurrent"] = uint64(0)
+		if exists { details["MemoryPeak"] = service.MemPeak }
+	} else {
+		details["ActiveState"] = "inactive"
+		details["SubState"] = "dead"
+		details["MemoryCurrent"] = uint64(0)
+		if exists { details["MemoryPeak"] = service.MemPeak }
 	}
 
-	// 4. 补全完整的 Systemd 兼容元数据
+	// 4. Complete Systemd-compatible metadata
 	details["Id"] = serviceName
 	details["Description"] = uName + " (OpenWrt Procd)"
 	details["LoadState"] = "loaded"
@@ -282,7 +289,7 @@ func (sm *systemdManager) getServiceDetails(serviceName string) (systemd.Service
 	details["NRestarts"] = uint64(0)
 	details["StatusText"] = ""
 
-	// 检测服务开机自启状态
+	// Check the self-starting status of the service
 	unitFileState := "disabled"
 	if info, err := os.Stat(initScript); err == nil && !info.Mode().IsDir() {
 		if err := exec.Command(initScript, "enabled").Run(); err == nil {
@@ -291,7 +298,7 @@ func (sm *systemdManager) getServiceDetails(serviceName string) (systemd.Service
 	}
 	details["UnitFileState"] = unitFileState
 
-	// 动态检测服务控制能力 (Capabilities)
+	// Dynamic detection service control capability (Capabilities)
 	canStart, canStop, canReload := false, false, false
 	if info, err := os.Stat(initScript); err == nil && !info.Mode().IsDir() {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
