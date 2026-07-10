@@ -4,6 +4,9 @@ The lightweight telemetry agent adapted to OpenWrt is used to report system and 
 #### (Based on the official source code)
 Automatically synchronize and track the latest version of upstream
 
+- Support OpenWrt's procd so that Service detail can display the status correctly.
+<img width="1460" height="755" alt="Screenshot 2026-07-10 at 21 54 34" src="https://github.com/user-attachments/assets/27e11de7-18fa-4f00-9429-6ecd4a718e75" />
+
 ### Attribution
 #### Reference
 - [beszel official](https://github.com/henrygd/beszel) 
