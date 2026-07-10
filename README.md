@@ -1,6 +1,10 @@
 # beszel-agent
 The lightweight telemetry agent adapted to OpenWrt is used to report system and Docker indicators to your Beszel Hub.
 
+## luci-app-beszel-agent
+LuCI UI configuration interface of Beszel Agent
+- [Right-click on this and then "Open Link in New Tab"](https://github.com/OneNAS-space/luci-app-beszel-agent)
+
 #### (Based on the official source code)
 Automatically synchronize and track the latest version of upstream
 
