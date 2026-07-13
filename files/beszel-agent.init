@@ -25,6 +25,7 @@ start_service() {
     config_get key "main" "key" ""
     config_get token "main" "token" ""
     config_get hub_url "main" "hub_url" ""
+    config_get nics "main" "nics" ""
 
     FS_LIST=""
     config_list_foreach "main" "extra_filesystems" append_fs
@@ -38,6 +39,7 @@ start_service() {
     [ -n "$token" ] && procd_append_param env TOKEN="$token"
     [ -n "$hub_url" ] && procd_append_param env HUB_URL="$hub_url"
     [ -n "$FS_LIST" ] && procd_append_param env EXTRA_FILESYSTEMS="$FS_LIST"
+    [ -n "$nics" ] && procd_append_param env NICS="$nics"
     
     procd_set_param stdout 1
     procd_set_param stderr 1
