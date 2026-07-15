@@ -47,6 +47,7 @@ start_service() {
 
     procd_set_param env PORT="$port" HOST_PROC="/proc" HOST_SYS="/sys"
 
+    [ -n "$system_name" ] && procd_append_param env SYSTEM_NAME="$system_name"
     [ -n "$key" ] && procd_append_param env KEY="$key"
     [ -n "$token" ] && procd_append_param env TOKEN="$token"
     [ -n "$hub_url" ] && procd_append_param env HUB_URL="$hub_url"
