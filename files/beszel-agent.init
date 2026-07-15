@@ -30,6 +30,7 @@ start_service() {
     config_get_bool enable "main" "enable" 0
     [ "$enable" -eq 1 ] || return 0
 
+    config_get listen "main" "listen" ""
     config_get port "main" "port" "45876"
     config_get key "main" "key" ""
     config_get token "main" "token" ""
@@ -47,6 +48,13 @@ start_service() {
 
     procd_set_param env PORT="$port" HOST_PROC="/proc" HOST_SYS="/sys"
 
+    if [ -n "$listen" ]; then
+        procd_append_param env LISTEN="$listen"
+    else
+        procd_append_param env PORT="$port"
+    fi
+
+    [ -n "$system_name" ] && procd_append_param env SYSTEM_NAME="$system_name"
     [ -n "$key" ] && procd_append_param env KEY="$key"
     [ -n "$token" ] && procd_append_param env TOKEN="$token"
     [ -n "$hub_url" ] && procd_append_param env HUB_URL="$hub_url"
