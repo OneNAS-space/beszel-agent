@@ -23,7 +23,7 @@ append_nic() {
 }
 
 start_service() {
-    local enable port key token hub_url
+    local enable port key token hub_url system_name
 
     config_load beszel-agent
 
@@ -34,6 +34,7 @@ start_service() {
     config_get key "main" "key" ""
     config_get token "main" "token" ""
     config_get hub_url "main" "hub_url" ""
+    config_get system_name "main" "system_name" ""
 
     FS_LIST=""
     config_list_foreach "main" "extra_filesystems" append_fs
