@@ -100,6 +100,7 @@ func (gm *GPUManager) collectIntelStats() (err error) {
 	lastRc6 = currRc6
 	lastEnergy = currEnergy
 	lastTime = now
+	time.Sleep(2 * time.Second)
 
 	return nil
 }
