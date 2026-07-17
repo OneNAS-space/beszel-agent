@@ -21,10 +21,10 @@ type intelGpuStats struct {
 }
 
 var (
-	gpuStateMu   sync.Mutex
-	lastRc6Ms    uint64
-	lastEnergyUj uint64
-	lastTime     time.Time
+	gpuStateMu sync.Mutex
+	lastRc6 uint64
+	lastEnergy uint64
+	lastTime time.Time
 )
 
 func (gm *GPUManager) updateIntelFromStats(sample *intelGpuStats) bool {
@@ -56,7 +56,7 @@ func (gm *GPUManager) collectIntelStats() (err error) {
 	gpuStateMu.Lock()
 	defer gpuStateMu.Unlock()
 
-	device := utils.GetEnv("INTEL_GPU_DEVICE")
+	device := os.Getenv("INTEL_GPU_DEVICE")
 	if device == "" {
 		device = "card0"
 	}
