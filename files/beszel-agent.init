@@ -38,9 +38,16 @@ start_service() {
     config_get log_level "main" "log_level" "info"
     config_get port "main" "port" "45876"
     config_get skip_gpu "main" "skip_gpu" "false"
-    if ! ls /sys/class/drm/card[0-9]* >/dev/null 2>&1; then
-        skip_gpu="true"
-    fi
+    case "$(uname -m)" in
+        x86_64|i?86)
+            if ! ls /sys/class/drm/card[0-9]* >/dev/null 2>&1; then
+                skip_gpu="true"
+            fi
+            ;;
+        *)
+            skip_gpu="true"
+            ;;
+    esac
     config_get skip_systemd "main" "skip_systemd" "false"
     config_get system_name "main" "system_name" ""
     config_get token "main" "token" ""
