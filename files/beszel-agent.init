@@ -23,13 +23,14 @@ append_nic() {
 }
 
 start_service() {
-    local enable hub_url intel_gpu_device key listen log_level port token skip_gpu skip_systemd system_name
+    local enable docker_host hub_url intel_gpu_device key listen log_level port token skip_gpu skip_systemd system_name
 
     config_load beszel-agent
 
     config_get_bool enable "main" "enable" 0
     [ "$enable" -eq 1 ] || return 0
 
+    config_get docker_host "main" "docker_host" ""
     config_get hub_url "main" "hub_url" ""
     config_get intel_gpu_device "main" "intel_gpu_device" ""
     config_get key "main" "key" ""
@@ -58,6 +59,7 @@ start_service() {
         procd_append_param env PORT="$port"
     fi
 
+    [ -n "$docker_host" ] && procd_append_param env DOCKER_HOST="$docker_host"
     [ -n "$hub_url" ] && procd_append_param env HUB_URL="$hub_url"
     [ -n "$intel_gpu_device" ] && procd_append_param env INTEL_GPU_DEVICE="$intel_gpu_device"
     [ -n "$key" ] && procd_append_param env KEY="$key"
