@@ -43,7 +43,7 @@ define Build/Prepare
 	$(CP) ./files/openwrt_services.go $(PKG_BUILD_DIR)/agent/
 	$(CP) ./files/openwrt_intel_gpu.go $(PKG_BUILD_DIR)/agent/
 	$(SED) 's|//go:build linux|//go:build linux \&\& !openwrt|' $(PKG_BUILD_DIR)/agent/systemd.go
-	$(SED) 's|//go:build linux|//go:build linux \&\& !openwrt|' $(PKG_BUILD_DIR)/agent/gpu_intel.go
+	rm -f $(PKG_BUILD_DIR)/agent/gpu_intel.go
 endef
 
 define Package/beszel-agent/conffiles
