@@ -4,16 +4,16 @@ package agent
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
-	// "github.com/henrygd/beszel/agent/utils"
 	"github.com/henrygd/beszel/internal/entities/system"
 )
+
+const intelGpuStatsCmd = "sh"
 
 type intelGpuStats struct {
 	PowerGPU float64
@@ -26,7 +26,6 @@ var (
 	lastRc6 uint64
 	lastEnergy uint64
 	lastTime time.Time
-	intelGpuStatsCmd *exec.Cmd
 )
 
 func (gm *GPUManager) updateIntelFromStats(sample *intelGpuStats) bool {
