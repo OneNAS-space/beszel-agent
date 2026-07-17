@@ -11,6 +11,9 @@ Automatically synchronize and track the latest version of upstream
 - Support OpenWrt's procd so that Service detail can display the status correctly.
 <img width="1460" height="755" alt="Screenshot 2026-07-10 at 21 54 34" src="https://github.com/user-attachments/assets/09109fd9-4811-412e-9a45-11660054b481" />
 
+- Support Intel GPU
+<img width="1446" height="419" alt="Screenshot 2026-07-17 at 23 36 34" src="https://github.com/user-attachments/assets/cca94b20-489b-4a83-9432-30ed7f9071be" />
+
 ### Attribution
 #### Reference
 - [beszel official](https://github.com/henrygd/beszel) 
