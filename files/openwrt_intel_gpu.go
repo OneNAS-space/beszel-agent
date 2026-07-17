@@ -10,7 +10,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/coreos/go-systemd/v22/dbus"
 	"github.com/henrygd/beszel/agent/utils"
 	"github.com/henrygd/beszel/internal/entities/system"
 )
