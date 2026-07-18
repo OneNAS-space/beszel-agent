@@ -13,31 +13,73 @@ append_fs() {
     fi
 }
 
+append_nic() {
+    local value="$1"
+    if [ -z "$NIC_LIST" ]; then
+        NIC_LIST="$value"
+    else
+        NIC_LIST="$NIC_LIST,$value"
+    fi
+}
+
 start_service() {
-    local enable port key token hub_url
+    local enable docker_host hub_url intel_gpu_device key listen log_level port token skip_gpu skip_systemd system_name
 
     config_load beszel-agent
 
     config_get_bool enable "main" "enable" 0
     [ "$enable" -eq 1 ] || return 0
 
-    config_get port "main" "port" "45876"
-    config_get key "main" "key" ""
-    config_get token "main" "token" ""
+    config_get docker_host "main" "docker_host" ""
     config_get hub_url "main" "hub_url" ""
+    config_get intel_gpu_device "main" "intel_gpu_device" ""
+    config_get key "main" "key" ""
+    config_get listen "main" "listen" ""
+    config_get log_level "main" "log_level" "info"
+    config_get port "main" "port" "45876"
+    config_get skip_gpu "main" "skip_gpu" "false"
+    case "$(uname -m)" in
+        x86_64|i?86)
+            if ! ls /sys/class/drm/card[0-9]* >/dev/null 2>&1; then
+                skip_gpu="true"
+            fi
+            ;;
+        *)
+            skip_gpu="true"
+            ;;
+    esac
+    config_get skip_systemd "main" "skip_systemd" "false"
+    config_get system_name "main" "system_name" ""
+    config_get token "main" "token" ""
 
     FS_LIST=""
     config_list_foreach "main" "extra_filesystems" append_fs
 
+    NIC_LIST=""
+    config_list_foreach "main" "nics" append_nic
+
     procd_open_instance "beszel-agent"
     procd_set_param command "$PROG"
 
-    procd_set_param env PORT="$port" HOST_PROC="/proc" HOST_SYS="/sys"
+    procd_set_param env HOST_PROC="/proc" HOST_SYS="/sys"
 
-    [ -n "$key" ] && procd_append_param env KEY="$key"
-    [ -n "$token" ] && procd_append_param env TOKEN="$token"
+    if [ -n "$listen" ]; then
+        procd_append_param env LISTEN="$listen"
+    else
+        procd_append_param env PORT="$port"
+    fi
+
+    [ -n "$docker_host" ] && procd_append_param env DOCKER_HOST="$docker_host"
     [ -n "$hub_url" ] && procd_append_param env HUB_URL="$hub_url"
+    [ -n "$intel_gpu_device" ] && procd_append_param env INTEL_GPU_DEVICE="$intel_gpu_device"
+    [ -n "$key" ] && procd_append_param env KEY="$key"
+    [ -n "$log_level" ] && procd_append_param env LOG_LEVEL="$log_level"
+    [ -n "$skip_gpu" ] && procd_append_param env SKIP_GPU="$skip_gpu"
+    [ -n "$skip_systemd" ] && procd_append_param env SKIP_SYSTEMD="$skip_systemd"
+    [ -n "$system_name" ] && procd_append_param env SYSTEM_NAME="$system_name"
+    [ -n "$token" ] && procd_append_param env TOKEN="$token"
     [ -n "$FS_LIST" ] && procd_append_param env EXTRA_FILESYSTEMS="$FS_LIST"
+    [ -n "$NIC_LIST" ] && procd_append_param env NICS="$NIC_LIST"
     
     procd_set_param stdout 1
     procd_set_param stderr 1

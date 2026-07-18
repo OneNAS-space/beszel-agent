@@ -2,7 +2,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=beszel
 PKG_VERSION:=0.18.7
-PKG_RELEASE:=5
+PKG_RELEASE:=20
 
 PKG_SOURCE:=beszel-$(PKG_VERSION).tar.gz
 PKG_SOURCE_URL:=https://codeload.github.com/henrygd/beszel/tar.gz/v$(PKG_VERSION)?
@@ -41,11 +41,34 @@ endef
 define Build/Prepare
 	$(call Build/Prepare/Default)
 	$(CP) ./files/openwrt_services.go $(PKG_BUILD_DIR)/agent/
+	$(CP) ./files/openwrt_intel_gpu.go $(PKG_BUILD_DIR)/agent/
 	$(SED) 's|//go:build linux|//go:build linux \&\& !openwrt|' $(PKG_BUILD_DIR)/agent/systemd.go
+	rm -f $(PKG_BUILD_DIR)/agent/gpu_intel.go
 endef
 
 define Package/beszel-agent/conffiles
 /etc/config/beszel-agent
+endef
+
+define Package/beszel-agent/preinst
+#!/bin/sh
+if [ -z "$${IPKG_INSTROOT}" ]; then
+	if [ -f "/etc/init.d/beszel-agent" ]; then
+		echo "Stopping old Beszel Agent instance before upgrade..."
+		/etc/init.d/beszel-agent stop
+	fi
+fi
+exit 0
+endef
+
+define Package/beszel-agent/postinst
+#!/bin/sh
+if [ -z "$${IPKG_INSTROOT}" ]; then
+	echo "Beszel Agent updated successfully. Starting service..."
+	/etc/init.d/beszel-agent enable
+	/etc/init.d/beszel-agent start
+fi
+exit 0
 endef
 
 define Package/beszel-agent/install
