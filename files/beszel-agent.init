@@ -23,7 +23,7 @@ append_nic() {
 }
 
 start_service() {
-    local enable docker_host hub_url intel_gpu_device key listen log_level port token skip_gpu skip_systemd system_name
+    local enable docker_host gpu_collector hub_url intel_gpu_device key listen log_level port token skip_gpu skip_systemd system_name
 
     config_load beszel-agent
 
@@ -31,6 +31,7 @@ start_service() {
     [ "$enable" -eq 1 ] || return 0
 
     config_get docker_host "main" "docker_host" ""
+    config_get gpu_collector "main" "gpu_collector" ""
     config_get hub_url "main" "hub_url" ""
     config_get intel_gpu_device "main" "intel_gpu_device" ""
     config_get key "main" "key" ""
@@ -71,7 +72,6 @@ start_service() {
 
     [ -n "$docker_host" ] && procd_append_param env DOCKER_HOST="$docker_host"
     [ -n "$hub_url" ] && procd_append_param env HUB_URL="$hub_url"
-    [ -n "$intel_gpu_device" ] && procd_append_param env INTEL_GPU_DEVICE="$intel_gpu_device"
     [ -n "$key" ] && procd_append_param env KEY="$key"
     [ -n "$log_level" ] && procd_append_param env LOG_LEVEL="$log_level"
     [ -n "$skip_gpu" ] && procd_append_param env SKIP_GPU="$skip_gpu"
@@ -80,7 +80,14 @@ start_service() {
     [ -n "$token" ] && procd_append_param env TOKEN="$token"
     [ -n "$FS_LIST" ] && procd_append_param env EXTRA_FILESYSTEMS="$FS_LIST"
     [ -n "$NIC_LIST" ] && procd_append_param env NICS="$NIC_LIST"
-    
+
+    if [ "$skip_gpu" = "false" ]; then
+        [ -n "$gpu_collector" ] && procd_append_param env GPU_COLLECTOR="$gpu_collector"
+        if [ "$gpu_collector" = "intel_gpu_top" ] || [ -z "$gpu_collector" ]; then
+            [ -n "$intel_gpu_device" ] && procd_append_param env INTEL_GPU_DEVICE="$intel_gpu_device"
+        fi
+    fi
+
     procd_set_param stdout 1
     procd_set_param stderr 1
 
