@@ -140,6 +140,13 @@ jobs:
             --exclude='SECURITY.md' \
             ./ feed/jackie264/${PKG_NAME}/
 
+          # ▼ 新增：解除 OpenWrt SDK 对 Go 版本的强制锁定 ▼
+          cat << 'EOF' >> feed/jackie264/${PKG_NAME}/Makefile
+
+          # Unlock Go native toolchain auto-upgrade (override OpenWrt's GOTOOLCHAIN=local)
+          GO_PKG_BUILD_ENV := $(subst GOTOOLCHAIN=local,GOTOOLCHAIN=auto,$(GO_PKG_BUILD_ENV))
+          EOF
+
       - name: 🏗️ Build with OpenWrt SDK
         uses: openwrt/gh-action-sdk@v11
         env:
@@ -151,13 +158,6 @@ jobs:
           NO_SHFMT_CHECK: 1
           NO_REFRESH_CHECK: 1
           V: s
-          EXTRA_COMMANDS: |
-            echo "==> Hot-swapping golang toolchain to latest master..."
-            git clone -b master --depth 1 https://github.com/openwrt/packages.git temp_packages
-            rm -rf feeds/packages/lang/golang
-            cp -r temp_packages/lang/golang feeds/packages/lang/
-            rm -rf temp_packages
-            echo "==> Golang hot-swap completed."
           
       - name: 🔍 Debug build output
         run: |
