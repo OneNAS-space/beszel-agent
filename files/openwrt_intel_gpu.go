@@ -24,15 +24,41 @@ type intelGpuStats struct {
 var (
 	gpuStateMu sync.Mutex
 	lastRc6 uint64
-	lastEnergy uint64
+	lastGpuEnergy uint64
+	lastPkgEnergy uint64
 	lastTime time.Time
 )
+
+func getEnergyPaths() (gpuPath string, pkgPath string) {
+	pkgBase := "/sys/class/powercap/intel-rapl/intel-rapl:0"
+	gpuBase := "/sys/class/powercap/intel-rapl/intel-rapl:0/intel-rapl:0:1"
+
+	if _, err := os.Stat(pkgBase + "/energy_uj"); err == nil {
+		pkgPath = pkgBase + "/energy_uj"
+	}
+	if _, err := os.Stat(gpuBase + "/energy_uj"); err == nil {
+		gpuPath = gpuBase + "/energy_uj"
+	}
+	return gpuPath, pkgPath
+}
+
+func readUint64(path string) uint64 {
+	if path == "" {
+		return 0
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return 0
+	}
+	val, _ := strconv.ParseUint(strings.TrimSpace(string(data)), 10, 64)
+	return val
+}
 
 func (gm *GPUManager) updateIntelFromStats(sample *intelGpuStats) bool {
 	gm.Lock()
 	defer gm.Unlock()
 
-	id := "i0"
+	id := "0"
 	gpuData, ok := gm.GpuDataMap[id]
 	if !ok {
 		gpuData = &system.GPUData{Name: "GPU", Engines: make(map[string]float64)}
@@ -64,16 +90,11 @@ func (gm *GPUManager) collectIntelStats() (err error) {
 	device = filepath.Base(device)
 
 	rc6Path := "/sys/class/drm/" + device + "/power/rc6_residency_ms"
-	powerPath := "/sys/devices/virtual/powercap/intel-rapl/intel-rapl:0/intel-rapl:0:1/energy_uj"
-	
-	rc6Data, err := os.ReadFile(rc6Path)
-	if err != nil {
-		return err
-	}
-	currRc6, _ := strconv.ParseUint(strings.TrimSpace(string(rc6Data)), 10, 64)
+	gpuEnergyPath, pkgEnergyPath := getEnergyPaths()
 
-	energyData, _ := os.ReadFile(powerPath)
-	currEnergy, _ := strconv.ParseUint(strings.TrimSpace(string(energyData)), 10, 64)
+	currRc6 := readUint64(rc6Path)
+	currGpuEnergy := readUint64(gpuEnergyPath)
+	currPkgEnergy := readUint64(pkgEnergyPath)
 
 	now := time.Now()
 	
@@ -84,11 +105,21 @@ func (gm *GPUManager) collectIntelStats() (err error) {
 			usage := 100.0 - (float64(rc6Delta) / float64(timeDelta) * 100.0)
 			if usage < 0 { usage = 0 }
 
-			energyDelta := currEnergy - lastEnergy
-			power := float64(energyDelta) / float64(timeDelta) / 1000.0 // Watts
+			var powerGPU float64
+			if currGpuEnergy > 0 && currGpuEnergy >= lastGpuEnergy {
+				energyDelta := currGpuEnergy - lastGpuEnergy
+				powerGPU = float64(energyDelta) / float64(timeDelta) / 1000.0
+			}
+
+			var powerPkg float64
+			if currPkgEnergy > 0 && currPkgEnergy >= lastPkgEnergy {
+				energyDelta := currPkgEnergy - lastPkgEnergy
+				powerPkg = float64(energyDelta) / float64(timeDelta) / 1000.0
+			}
 
 			sample := intelGpuStats{
 				PowerGPU: power,
+				PowerPkg: power,
 				Engines: map[string]float64{
 					"Render/3D": usage,
 				},
@@ -98,7 +129,8 @@ func (gm *GPUManager) collectIntelStats() (err error) {
 	}
 
 	lastRc6 = currRc6
-	lastEnergy = currEnergy
+	lastGpuEnergy = currGpuEnergy
+	lastPkgEnergy = currPkgEnergy
 	lastTime = now
 	time.Sleep(2 * time.Second)
 
