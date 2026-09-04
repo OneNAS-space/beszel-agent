@@ -151,6 +151,13 @@ jobs:
           NO_SHFMT_CHECK: 1
           NO_REFRESH_CHECK: 1
           V: s
+          EXTRA_COMMANDS: |
+            echo "==> Hot-swapping golang toolchain to latest master..."
+            git clone -b master --depth 1 https://github.com/openwrt/packages.git temp_packages
+            rm -rf feeds/packages/lang/golang
+            cp -r temp_packages/lang/golang feeds/packages/lang/
+            rm -rf temp_packages
+            echo "==> Golang hot-swap completed."
           
       - name: 🔍 Debug build output
         run: |
