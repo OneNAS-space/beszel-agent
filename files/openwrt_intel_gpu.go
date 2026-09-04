@@ -118,8 +118,8 @@ func (gm *GPUManager) collectIntelStats() (err error) {
 			}
 
 			sample := intelGpuStats{
-				PowerGPU: power,
-				PowerPkg: power,
+				PowerGPU: powerGPU,
+				PowerPkg: powerPkg,
 				Engines: map[string]float64{
 					"Render/3D": usage,
 				},
