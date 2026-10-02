@@ -27,6 +27,7 @@ type systemdManager struct {
 	isRunning       bool
 	hasFreshStats   bool
 	patterns        []string
+	logsEnabled     bool
 }
 
 func isSystemdAvailable() bool {
@@ -338,10 +339,6 @@ func getServicePatterns() []string {
 		patterns = []string{"*.service"}
 	}
 	return patterns
-}
-
-func (sm *systemdManager) logsEnabled() bool {
-	return false
 }
 
 func (sm *systemdManager) getServiceLogs(serviceName string) ([]byte, error) {
