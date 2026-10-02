@@ -339,3 +339,17 @@ func getServicePatterns() []string {
 	}
 	return patterns
 }
+
+func (sm *systemdManager) logsEnabled() bool {
+	return false
+}
+
+func (sm *systemdManager) getServiceLogs(serviceName string) ([]byte, error) {
+	/* 
+	   未来进阶提示：如果你想在前端也看到 OpenWrt 的服务日志，
+	   可以将 serviceName 去掉后缀，然后通过执行类似以下的命令返回真实的日志字节流：
+	   out, err := exec.Command("logread", "-e", strings.TrimSuffix(serviceName, ".service")).Output()
+	   return out, err
+	*/
+	return nil, nil
+}
