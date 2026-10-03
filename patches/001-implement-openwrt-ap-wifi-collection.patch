@@ -1,0 +1,149 @@
+From 6dae8d94be3d7507a029f2f3403a27d932c94f6e Mon Sep 17 00:00:00 2001
+From: Jackie Han <jackie.han@gmail.com>
+Date: Sat, 3 Oct 2026 10:03:20 +0800
+Subject: [PATCH] Implement OpenWrt AP collection in wifi_linux.go
+
+Added support for collecting WiFi access points on OpenWrt using iwinfo command. Enhanced the collect function to handle OpenWrt-specific logic.
+---
+ agent/wifi/wifi_linux.go | 86 ++++++++++++++++++++++++++++++++++------
+ 1 file changed, 73 insertions(+), 13 deletions(-)
+
+diff --git a/agent/wifi/wifi_linux.go b/agent/wifi/wifi_linux.go
+index 926d658fe..835470b33 100644
+--- a/agent/wifi/wifi_linux.go
++++ b/agent/wifi/wifi_linux.go
+@@ -7,6 +7,10 @@ import (
+ 	"errors"
+ 	"net"
+ 	"os"
++	"os/exec"
++	"regexp"
++	"strconv"
++	"strings"
+ 	"time"
+ 
+ 	"github.com/henrygd/beszel/internal/entities/system"
+@@ -24,9 +28,6 @@ type linuxClient interface {
+ 	Close() error
+ }
+ 
+-// nl80211Client adds a targeted GET_STATION request, as used by `iw link`.
+-// mdlayher/wifi only dumps stations, which some full-MAC drivers (e.g.
+-// out-of-tree Realtek USB) answer with an empty list.
+ type nl80211Client struct {
+ 	*native.Client
+ 	conn   *genetlink.Conn
+@@ -81,13 +82,8 @@ func (c *nl80211Client) Close() error {
+ 	return errors.Join(c.conn.Close(), c.Client.Close())
+ }
+ 
+-// wiphyClassDir lists the wireless devices registered with cfg80211.
+ const wiphyClassDir = "/sys/class/ieee80211"
+ 
+-// hasWirelessDevice gates nl80211 access. Looking up the nl80211 family while
+-// cfg80211 is not loaded makes the kernel run modprobe, which loads the module
+-// on hosts without wireless hardware, or fails again on every poll. Not cached,
+-// so devices registered after startup are still picked up.
+ func hasWirelessDevice(dir string) bool {
+ 	f, err := os.Open(dir)
+ 	if err != nil {
+@@ -99,6 +95,10 @@ func hasWirelessDevice(dir string) bool {
+ }
+ 
+ func collect(ctx context.Context) map[string]system.WiFi {
++	if _, err := exec.LookPath("iwinfo"); err == nil {
++		return collectOpenWrtAP()
++	}
++
+ 	if !hasWirelessDevice(wiphyClassDir) {
+ 		return nil
+ 	}
+@@ -110,6 +110,71 @@ func collect(ctx context.Context) map[string]system.WiFi {
+ 	return collectLinux(ctx, client)
+ }
+ 
++func collectOpenWrtAP() map[string]system.WiFi {
++	results := make(map[string]system.WiFi)
++
++	entries, err := os.ReadDir("/sys/class/net")
++	if err != nil {
++		return results
++	}
++
++	reMode := regexp.MustCompile(`Mode:\s*Master`)
++	reSsid := regexp.MustCompile(`ESSID:\s*"([^"]+)"`)
++	reAssoc := regexp.MustCompile(`(?m)^([0-9a-fA-F]{2}[:-]){5}[0-9a-fA-F]{2}.*?(-?\d+)\s+dBm`)
++
++	for _, entry := range entries {
++		iface := entry.Name()
++
++		if iface == "lo" || strings.HasPrefix(iface, "eth") || strings.HasPrefix(iface, "br-") ||
++			strings.HasPrefix(iface, "docker") || strings.HasPrefix(iface, "veth") || strings.HasPrefix(iface, "pppoe") {
++			continue
++		}
++
++		infoOut, err := exec.Command("iwinfo", iface, "info").Output()
++		if err != nil {
++			continue
++		}
++		infoStr := string(infoOut)
++
++		if !reMode.MatchString(infoStr) {
++			continue
++		}
++
++		ssid := "Unknown"
++		if m := reSsid.FindStringSubmatch(infoStr); len(m) > 1 {
++			ssid = m[1]
++		}
++
++		var avgRssi float64 = -100
++		assocOut, err := exec.Command("iwinfo", iface, "assoclist").Output()
++		if err == nil {
++			matches := reAssoc.FindAllStringSubmatch(string(assocOut), -1)
++			sum, count := 0, 0
++			for _, m := range matches {
++				if len(m) > 2 {
++					if rssi, err := strconv.Atoi(m[2]); err == nil {
++						sum += rssi
++						count++
++					}
++				}
++			}
++			if count > 0 {
++				avgRssi = float64(sum) / float64(count)
++			}
++		}
++
++		reading := system.WiFi{SSID: validSSID(ssid)}
++		if avgRssi >= -150 && avgRssi < 0 {
++			sig := avgRssi 
++			reading.Signal = &sig
++		}
++
++		results[iface] = reading
++	}
++
++	return results
++}
++
+ func collectLinux(ctx context.Context, client linuxClient) map[string]system.WiFi {
+ 	result := make(map[string]system.WiFi)
+ 	if ctx.Err() != nil {
+@@ -131,16 +196,11 @@ func collectLinux(ctx context.Context, client linuxClient) map[string]system.WiF
+ 		if iface == nil || iface.Type != native.InterfaceTypeStation || iface.Name == "" {
+ 			continue
+ 		}
+-		// GET_SCAN reads the kernel's BSS cache, without triggering a scan.
+-		// Only the explicit associated status proves a current connection.
+ 		bss, err := client.BSS(iface)
+ 		if err != nil || bss == nil || bss.Status != native.BSSStatusAssociated {
+ 			continue
+ 		}
+ 		reading := system.WiFi{SSID: validSSID(bss.SSID)}
+-		// Station statistics may require permissions unavailable in default
+-		// containers. Keep association even when RSSI cannot be read. Do not
+-		// substitute cached scan signal, which may be arbitrarily old.
+ 		if len(bss.BSSID) > 0 {
+ 			if station, err := client.Station(iface, bss.BSSID); err == nil && station != nil {
+ 				signal := float64(station.Signal)
