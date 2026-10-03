@@ -1,15 +1,14 @@
-From 6dae8d94be3d7507a029f2f3403a27d932c94f6e Mon Sep 17 00:00:00 2001
+From 12e1c7d7949118c3b1fdbbd76c83659d043c1397 Mon Sep 17 00:00:00 2001
 From: Jackie Han <jackie.han@gmail.com>
-Date: Sat, 3 Oct 2026 10:03:20 +0800
-Subject: [PATCH] Implement OpenWrt AP collection in wifi_linux.go
+Date: Sat, 3 Oct 2026 10:42:50 +0800
+Subject: [PATCH] Refactor WiFi collection logic for Linux
 
-Added support for collecting WiFi access points on OpenWrt using iwinfo command. Enhanced the collect function to handle OpenWrt-specific logic.
 ---
- agent/wifi/wifi_linux.go | 86 ++++++++++++++++++++++++++++++++++------
- 1 file changed, 73 insertions(+), 13 deletions(-)
+ agent/wifi/wifi_linux.go | 104 ++++++++++++++++++++++++++++++++-------
+ 1 file changed, 86 insertions(+), 18 deletions(-)
 
 diff --git a/agent/wifi/wifi_linux.go b/agent/wifi/wifi_linux.go
-index 926d658fe..835470b33 100644
+index 926d658fe..e38fa3663 100644
 --- a/agent/wifi/wifi_linux.go
 +++ b/agent/wifi/wifi_linux.go
 @@ -7,6 +7,10 @@ import (
@@ -47,28 +46,45 @@ index 926d658fe..835470b33 100644
  func hasWirelessDevice(dir string) bool {
  	f, err := os.Open(dir)
  	if err != nil {
-@@ -99,6 +95,10 @@ func hasWirelessDevice(dir string) bool {
+@@ -99,15 +95,92 @@ func hasWirelessDevice(dir string) bool {
  }
  
  func collect(ctx context.Context) map[string]system.WiFi {
-+	if _, err := exec.LookPath("iwinfo"); err == nil {
-+		return collectOpenWrtAP()
+-	if !hasWirelessDevice(wiphyClassDir) {
++	results := make(map[string]system.WiFi)
++
++	if hasWirelessDevice(wiphyClassDir) {
++		if client, err := newNL80211Client(); err == nil {
++			defer client.Close()
++			for k, v := range collectLinux(ctx, client) {
++				results[k] = v
++			}
++		}
 +	}
 +
- 	if !hasWirelessDevice(wiphyClassDir) {
++	if _, err := exec.LookPath("iwinfo"); err == nil {
++		for k, v := range collectOpenWrtAP() {
++			results[k] = v
++		}
++	}
++
++	if len(results) == 0 {
  		return nil
  	}
-@@ -110,6 +110,71 @@ func collect(ctx context.Context) map[string]system.WiFi {
- 	return collectLinux(ctx, client)
- }
- 
+-	client, err := newNL80211Client()
++	return results
++}
++
 +func collectOpenWrtAP() map[string]system.WiFi {
 +	results := make(map[string]system.WiFi)
 +
 +	entries, err := os.ReadDir("/sys/class/net")
-+	if err != nil {
+ 	if err != nil {
+-		return nil
 +		return results
-+	}
+ 	}
+-	defer client.Close()
+-	return collectLinux(ctx, client)
 +
 +	reMode := regexp.MustCompile(`Mode:\s*Master`)
 +	reSsid := regexp.MustCompile(`ESSID:\s*"([^"]+)"`)
@@ -125,12 +141,10 @@ index 926d658fe..835470b33 100644
 +	}
 +
 +	return results
-+}
-+
+ }
+ 
  func collectLinux(ctx context.Context, client linuxClient) map[string]system.WiFi {
- 	result := make(map[string]system.WiFi)
- 	if ctx.Err() != nil {
-@@ -131,16 +196,11 @@ func collectLinux(ctx context.Context, client linuxClient) map[string]system.WiF
+@@ -131,16 +204,11 @@ func collectLinux(ctx context.Context, client linuxClient) map[string]system.WiF
  		if iface == nil || iface.Type != native.InterfaceTypeStation || iface.Name == "" {
  			continue
  		}
