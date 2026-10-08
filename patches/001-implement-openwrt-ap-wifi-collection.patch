@@ -1,15 +1,14 @@
-From 41b09d397be468a96a9bc27eb8b32c6b21b9005a Mon Sep 17 00:00:00 2001
+From 4d43a8a163624c007f585f68776e38ea8fb63cf3 Mon Sep 17 00:00:00 2001
 From: Jackie Han <jackie.han@gmail.com>
-Date: Thu, 8 Oct 2026 15:49:45 +0800
-Subject: [PATCH] Refactor WiFi collection logic in wifi_linux.go
+Date: Thu, 8 Oct 2026 16:16:36 +0800
+Subject: [PATCH] Refactor WiFi collection logic for Linux and OpenWrt
 
-Refactor collect function to handle results from both NL80211 and iwinfo. Improve error handling and streamline the collection of WiFi information.
 ---
  agent/wifi/wifi_linux.go | 92 +++++++++++++++++++++++++++++++++++++---
  1 file changed, 87 insertions(+), 5 deletions(-)
 
 diff --git a/agent/wifi/wifi_linux.go b/agent/wifi/wifi_linux.go
-index 926d658fe..0f2973d28 100644
+index 926d658fe..dfbfd6c7e 100644
 --- a/agent/wifi/wifi_linux.go
 +++ b/agent/wifi/wifi_linux.go
 @@ -5,8 +5,13 @@ package wifi
@@ -113,7 +112,7 @@ index 926d658fe..0f2973d28 100644
 +
 +		reading := system.WiFi{SSID: validSSID(ssid)}
 +		if avgRssi >= -150 && avgRssi < 0 {
-+			sig := avgRssi 
++			sig := avgRssi
 +			reading.Signal = &sig
 +		}
 +
