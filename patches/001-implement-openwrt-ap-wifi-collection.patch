@@ -1,18 +1,22 @@
-From 12e1c7d7949118c3b1fdbbd76c83659d043c1397 Mon Sep 17 00:00:00 2001
+From 41b09d397be468a96a9bc27eb8b32c6b21b9005a Mon Sep 17 00:00:00 2001
 From: Jackie Han <jackie.han@gmail.com>
-Date: Sat, 3 Oct 2026 10:42:50 +0800
-Subject: [PATCH] Refactor WiFi collection logic for Linux
+Date: Thu, 8 Oct 2026 15:49:45 +0800
+Subject: [PATCH] Refactor WiFi collection logic in wifi_linux.go
 
+Refactor collect function to handle results from both NL80211 and iwinfo. Improve error handling and streamline the collection of WiFi information.
 ---
- agent/wifi/wifi_linux.go | 104 ++++++++++++++++++++++++++++++++-------
- 1 file changed, 86 insertions(+), 18 deletions(-)
+ agent/wifi/wifi_linux.go | 92 +++++++++++++++++++++++++++++++++++++---
+ 1 file changed, 87 insertions(+), 5 deletions(-)
 
 diff --git a/agent/wifi/wifi_linux.go b/agent/wifi/wifi_linux.go
-index 926d658fe..e38fa3663 100644
+index 926d658fe..0f2973d28 100644
 --- a/agent/wifi/wifi_linux.go
 +++ b/agent/wifi/wifi_linux.go
-@@ -7,6 +7,10 @@ import (
+@@ -5,8 +5,13 @@ package wifi
+ import (
+ 	"context"
  	"errors"
++	"math"
  	"net"
  	"os"
 +	"os/exec"
@@ -22,31 +26,7 @@ index 926d658fe..e38fa3663 100644
  	"time"
  
  	"github.com/henrygd/beszel/internal/entities/system"
-@@ -24,9 +28,6 @@ type linuxClient interface {
- 	Close() error
- }
- 
--// nl80211Client adds a targeted GET_STATION request, as used by `iw link`.
--// mdlayher/wifi only dumps stations, which some full-MAC drivers (e.g.
--// out-of-tree Realtek USB) answer with an empty list.
- type nl80211Client struct {
- 	*native.Client
- 	conn   *genetlink.Conn
-@@ -81,13 +82,8 @@ func (c *nl80211Client) Close() error {
- 	return errors.Join(c.conn.Close(), c.Client.Close())
- }
- 
--// wiphyClassDir lists the wireless devices registered with cfg80211.
- const wiphyClassDir = "/sys/class/ieee80211"
- 
--// hasWirelessDevice gates nl80211 access. Looking up the nl80211 family while
--// cfg80211 is not loaded makes the kernel run modprobe, which loads the module
--// on hosts without wireless hardware, or fails again on every poll. Not cached,
--// so devices registered after startup are still picked up.
- func hasWirelessDevice(dir string) bool {
- 	f, err := os.Open(dir)
- 	if err != nil {
-@@ -99,15 +95,92 @@ func hasWirelessDevice(dir string) bool {
+@@ -99,15 +104,92 @@ func hasWirelessDevice(dir string) bool {
  }
  
  func collect(ctx context.Context) map[string]system.WiFi {
@@ -127,7 +107,7 @@ index 926d658fe..e38fa3663 100644
 +				}
 +			}
 +			if count > 0 {
-+				avgRssi = float64(sum) / float64(count)
++				avgRssi = math.Round(float64(sum) / float64(count))
 +			}
 +		}
 +
@@ -144,20 +124,3 @@ index 926d658fe..e38fa3663 100644
  }
  
  func collectLinux(ctx context.Context, client linuxClient) map[string]system.WiFi {
-@@ -131,16 +204,11 @@ func collectLinux(ctx context.Context, client linuxClient) map[string]system.WiF
- 		if iface == nil || iface.Type != native.InterfaceTypeStation || iface.Name == "" {
- 			continue
- 		}
--		// GET_SCAN reads the kernel's BSS cache, without triggering a scan.
--		// Only the explicit associated status proves a current connection.
- 		bss, err := client.BSS(iface)
- 		if err != nil || bss == nil || bss.Status != native.BSSStatusAssociated {
- 			continue
- 		}
- 		reading := system.WiFi{SSID: validSSID(bss.SSID)}
--		// Station statistics may require permissions unavailable in default
--		// containers. Keep association even when RSSI cannot be read. Do not
--		// substitute cached scan signal, which may be arbitrarily old.
- 		if len(bss.BSSID) > 0 {
- 			if station, err := client.Station(iface, bss.BSSID); err == nil && station != nil {
- 				signal := float64(station.Signal)
