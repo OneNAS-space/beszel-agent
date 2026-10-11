@@ -2,6 +2,7 @@
 
 START=99
 USE_PROCD=1
+NAME=beszel-agent
 PROG=/usr/bin/beszel-agent
 
 append_fs() {
@@ -22,16 +23,23 @@ append_nic() {
     fi
 }
 
-start_service() {
-    local enable docker_host gpu_collector hub_url intel_gpu_device key listen log_level port token skip_gpu skip_systemd system_name
+boot() {
+    local delay
+    delay="$(uci -q get $NAME.@main.boot_delay)"
+    sleep "${delay:-15}"
+    start "$@"
+}
 
-    config_load beszel-agent
+start_service() {
+    local enable data_dir docker_host gpu_collector hub_url intel_gpu_device key listen log_level port token skip_gpu skip_systemd system_name
+
+    config_load "$NAME"
 
     config_get_bool enable "main" "enable" 0
     [ "$enable" -eq 1 ] || return 0
 
-    config_get docker_host "main" "docker_host" ""
     config_get data_dir "main" "data_dir" "/etc/beszel-agent"
+    config_get docker_host "main" "docker_host" ""
     config_get gpu_collector "main" "gpu_collector" ""
     config_get hub_url "main" "hub_url" ""
     config_get intel_gpu_device "main" "intel_gpu_device" ""
