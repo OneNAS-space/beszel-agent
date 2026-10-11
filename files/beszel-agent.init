@@ -31,6 +31,7 @@ start_service() {
     [ "$enable" -eq 1 ] || return 0
 
     config_get docker_host "main" "docker_host" ""
+    config_get data_dir "main" "data_dir" "/etc/beszel-agent"
     config_get gpu_collector "main" "gpu_collector" ""
     config_get hub_url "main" "hub_url" ""
     config_get intel_gpu_device "main" "intel_gpu_device" ""
@@ -53,6 +54,10 @@ start_service() {
     config_get system_name "main" "system_name" ""
     config_get token "main" "token" ""
 
+    if [ -n "$data_dir" ]; then
+        mkdir -p "$data_dir"
+    fi
+
     FS_LIST=""
     config_list_foreach "main" "extra_filesystems" append_fs
 
@@ -71,15 +76,16 @@ start_service() {
     fi
 
     [ -n "$docker_host" ] && procd_append_param env DOCKER_HOST="$docker_host"
+    [ -n "$data_dir" ] && procd_append_param env DATA_DIR="$data_dir"
+    [ -n "$FS_LIST" ] && procd_append_param env EXTRA_FILESYSTEMS="$FS_LIST"
     [ -n "$hub_url" ] && procd_append_param env HUB_URL="$hub_url"
     [ -n "$key" ] && procd_append_param env KEY="$key"
     [ -n "$log_level" ] && procd_append_param env LOG_LEVEL="$log_level"
+    [ -n "$NIC_LIST" ] && procd_append_param env NICS="$NIC_LIST"
     [ -n "$skip_gpu" ] && procd_append_param env SKIP_GPU="$skip_gpu"
     [ -n "$skip_systemd" ] && procd_append_param env SKIP_SYSTEMD="$skip_systemd"
     [ -n "$system_name" ] && procd_append_param env SYSTEM_NAME="$system_name"
     [ -n "$token" ] && procd_append_param env TOKEN="$token"
-    [ -n "$FS_LIST" ] && procd_append_param env EXTRA_FILESYSTEMS="$FS_LIST"
-    [ -n "$NIC_LIST" ] && procd_append_param env NICS="$NIC_LIST"
 
     if [ "$skip_gpu" = "false" ]; then
         [ -n "$gpu_collector" ] && procd_append_param env GPU_COLLECTOR="$gpu_collector"
