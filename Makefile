@@ -81,9 +81,6 @@ define Package/beszel-agent/install
 
 	$(INSTALL_DIR) $(1)/etc/config
 	$(INSTALL_CONF) ./files/beszel-agent.config $(1)/etc/config/beszel-agent
-
-	$(INSTALL_DIR) $(1)/lib/upgrade/keep.d
-	$(INSTALL_DATA) ./files/lib/upgrade/keep.d/beszel-agent $(1)/lib/upgrade/keep.d/beszel-agent
 endef
 
 $(eval $(call GoPackage,beszel-agent))
