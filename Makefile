@@ -2,7 +2,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=beszel
 PKG_VERSION:=0.21.0
-PKG_RELEASE:=5
+PKG_RELEASE:=6
 
 PKG_SOURCE:=beszel-$(PKG_VERSION).tar.gz
 PKG_SOURCE_URL:=https://codeload.github.com/henrygd/beszel/tar.gz/v$(PKG_VERSION)?
@@ -81,6 +81,9 @@ define Package/beszel-agent/install
 
 	$(INSTALL_DIR) $(1)/etc/config
 	$(INSTALL_CONF) ./files/beszel-agent.config $(1)/etc/config/beszel-agent
+
+	$(INSTALL_DIR) $(1)/lib/upgrade/keep.d
+	$(INSTALL_DATA) ./files/lib/upgrade/keep.d/beszel-agent $(1)/lib/upgrade/keep.d/beszel-agent
 endef
 
 $(eval $(call GoPackage,beszel-agent))
