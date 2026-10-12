@@ -64,6 +64,11 @@ start_service() {
 
     if [ -n "$data_dir" ]; then
         mkdir -p "$data_dir"
+        if [ -f /etc/sysupgrade.conf ]; then
+            if ! grep -qFx "$data_dir" /etc/sysupgrade.conf; then
+                echo "$data_dir" >> /etc/sysupgrade.conf
+            fi
+        fi
     fi
 
     FS_LIST=""
