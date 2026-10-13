@@ -1,15 +1,14 @@
-From 3488ec30c5490db1d58f00008c695877e934f631 Mon Sep 17 00:00:00 2001
+From 128555126155413ce32b134435c425ad9bb24501 Mon Sep 17 00:00:00 2001
 From: Jackie Han <jackie.han@gmail.com>
-Date: Wed, 14 Oct 2026 06:52:53 +0800
-Subject: [PATCH] Refactor WiFi data collection logic
+Date: Wed, 14 Oct 2026 07:40:03 +0800
+Subject: [PATCH] Refactor collect function to handle wireless devices
 
-Refactor collect function to handle wireless devices more efficiently. Added support for collecting data from OpenWrt access points.
 ---
- agent/wifi/wifi_linux.go | 112 ++++++++++++++++++++++++++++++++++++---
- 1 file changed, 106 insertions(+), 6 deletions(-)
+ agent/wifi/wifi_linux.go | 111 ++++++++++++++++++++++++++++++++++++---
+ 1 file changed, 105 insertions(+), 6 deletions(-)
 
 diff --git a/agent/wifi/wifi_linux.go b/agent/wifi/wifi_linux.go
-index 926d658fe..c1e3f92ca 100644
+index 926d658fe..ea42b1f2b 100644
 --- a/agent/wifi/wifi_linux.go
 +++ b/agent/wifi/wifi_linux.go
 @@ -5,8 +5,12 @@ package wifi
@@ -25,7 +24,7 @@ index 926d658fe..c1e3f92ca 100644
  	"time"
  
  	"github.com/henrygd/beszel/internal/entities/system"
-@@ -99,15 +103,111 @@ func hasWirelessDevice(dir string) bool {
+@@ -99,15 +103,110 @@ func hasWirelessDevice(dir string) bool {
  }
  
  func collect(ctx context.Context) map[string]system.WiFi {
@@ -89,7 +88,6 @@ index 926d658fe..c1e3f92ca 100644
 +	if !iwinfoModeRe.MatchString(block) {
 +		return "", false
 +	}
-+	ssid = "Unknown"
 +	if m := iwinfoSSIDRe.FindStringSubmatch(block); len(m) > 1 {
 +		ssid = m[1]
 +	}
