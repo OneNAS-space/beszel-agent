@@ -1,14 +1,14 @@
-From 128555126155413ce32b134435c425ad9bb24501 Mon Sep 17 00:00:00 2001
+From 70f6bfc114b419ad1d1d999c4e74906c1ebc3819 Mon Sep 17 00:00:00 2001
 From: Jackie Han <jackie.han@gmail.com>
-Date: Wed, 14 Oct 2026 07:40:03 +0800
-Subject: [PATCH] Refactor collect function to handle wireless devices
+Date: Wed, 21 Oct 2026 22:20:40 +0800
+Subject: [PATCH] Refactor WiFi collection logic for Linux
 
 ---
- agent/wifi/wifi_linux.go | 111 ++++++++++++++++++++++++++++++++++++---
- 1 file changed, 105 insertions(+), 6 deletions(-)
+ agent/wifi/wifi_linux.go | 164 ++++++++++++++++++++++++++++++++++++---
+ 1 file changed, 152 insertions(+), 12 deletions(-)
 
 diff --git a/agent/wifi/wifi_linux.go b/agent/wifi/wifi_linux.go
-index 926d658fe..ea42b1f2b 100644
+index 926d658fef..1ba134e69c 100644
 --- a/agent/wifi/wifi_linux.go
 +++ b/agent/wifi/wifi_linux.go
 @@ -5,8 +5,12 @@ package wifi
@@ -24,36 +24,38 @@ index 926d658fe..ea42b1f2b 100644
  	"time"
  
  	"github.com/henrygd/beszel/internal/entities/system"
-@@ -99,15 +103,110 @@ func hasWirelessDevice(dir string) bool {
+@@ -99,36 +103,172 @@ func hasWirelessDevice(dir string) bool {
  }
  
  func collect(ctx context.Context) map[string]system.WiFi {
 -	if !hasWirelessDevice(wiphyClassDir) {
--		return nil
-+	results := make(map[string]system.WiFi)
-+
++	var client linuxClient
 +	if hasWirelessDevice(wiphyClassDir) {
-+		if client, err := newNL80211Client(); err == nil {
-+			for k, v := range collectLinux(ctx, client) {
-+				results[k] = v
-+			}
-+			client.Close()
++		if c, err := newNL80211Client(); err == nil {
++			client = c
++			defer client.Close()
 +		}
- 	}
--	client, err := newNL80211Client()
--	if err != nil {
++	}
++	return collectLinuxWithAP(ctx, client, runIwinfo)
++}
 +
-+	if _, err := exec.LookPath("iwinfo"); err == nil {
-+		for k, v := range collectOpenWrtAP(ctx) {
-+			results[k] = v
-+		}
++type iwinfoCommand func(context.Context, ...string) ([]byte, error)
++
++func runIwinfo(ctx context.Context, args ...string) ([]byte, error) {
++	return exec.CommandContext(ctx, "iwinfo", args...).Output()
++}
++
++func collectLinuxWithAP(ctx context.Context, client linuxClient, iwinfo iwinfoCommand) map[string]system.WiFi {
++	results, aps := collectLinux(ctx, client)
++	for k, v := range collectOpenWrtAP(ctx, aps, iwinfo) {
++		results[k] = v
 +	}
 +
 +	if len(results) == 0 {
  		return nil
  	}
--	defer client.Close()
--	return collectLinux(ctx, client)
+-	client, err := newNL80211Client()
+-	if err != nil {
 +	return results
 +}
 +
@@ -61,7 +63,7 @@ index 926d658fe..ea42b1f2b 100644
 +	iwinfoIfaceRe = regexp.MustCompile(`(?m)^(\S+)[ \t]+ESSID:`)
 +	iwinfoModeRe  = regexp.MustCompile(`Mode:[ \t]*Master`)
 +	iwinfoSSIDRe  = regexp.MustCompile(`ESSID:\s*"([^"]+)"`)
-+	iwinfoAssocRe = regexp.MustCompile(`(?m)^(?:[0-9a-fA-F]{2}[:-]){5}[0-9a-fA-F]{2}.*?(-?\d+)\s+dBm`)
++	iwinfoAssocRe = regexp.MustCompile(`(?m)^(?:[0-9a-fA-F]{2}[:-]){5}[0-9a-fA-F]{2}[ \t]+(-?\d+)[ \t]+dBm`)
 +)
 +
 +type iwinfoBlock struct {
@@ -112,25 +114,49 @@ index 926d658fe..ea42b1f2b 100644
 +	return math.Round(float64(sum) / float64(count)), true
 +}
 +
-+func collectOpenWrtAP(ctx context.Context) map[string]system.WiFi {
++// A nil aps requests discovery for drivers without a usable nl80211 inventory.
++// An empty, non-nil aps means enumeration succeeded and found no APs.
++func collectOpenWrtAP(ctx context.Context, aps []string, iwinfo iwinfoCommand) map[string]system.WiFi {
++	if ctx.Err() != nil || (aps != nil && len(aps) == 0) {
+ 		return nil
+ 	}
+-	defer client.Close()
+-	return collectLinux(ctx, client)
 +	results := make(map[string]system.WiFi)
-+
-+	out, err := exec.CommandContext(ctx, "iwinfo").Output()
-+	if err != nil && len(out) == 0 {
-+		return results
++	var blocks []iwinfoBlock
++	if aps == nil {
++		out, err := iwinfo(ctx)
++		if err != nil && len(out) == 0 {
++			return results
++		}
++		blocks = splitIwinfoBlocks(string(out))
++	} else {
++		for _, name := range aps {
++			blocks = append(blocks, iwinfoBlock{name: name})
++		}
 +	}
 +
-+	for _, b := range splitIwinfoBlocks(string(out)) {
++	for _, b := range blocks {
 +		if ctx.Err() != nil {
 +			return results
++		}
++		if aps != nil {
++			out, err := iwinfo(ctx, b.name, "info")
++			if err != nil {
++				continue
++			}
++			b.text = string(out)
 +		}
 +		ssid, isAP := parseIwinfoInfo(b.text)
 +		if !isAP {
 +			continue
 +		}
 +
-+		reading := system.WiFi{SSID: validSSID(ssid)}
-+		if assocOut, err := exec.CommandContext(ctx, "iwinfo", b.name, "assoclist").Output(); err == nil {
++		reading := system.WiFi{SSID: validSSID(ssid), AP: true}
++		if ctx.Err() != nil {
++			return results
++		}
++		if assocOut, err := iwinfo(ctx, b.name, "assoclist"); err == nil {
 +			if avg, ok := parseAssocRSSI(string(assocOut)); ok {
 +				reading.Signal = &avg
 +			}
@@ -140,4 +166,52 @@ index 926d658fe..ea42b1f2b 100644
 +	return results
  }
  
- func collectLinux(ctx context.Context, client linuxClient) map[string]system.WiFi {
+-func collectLinux(ctx context.Context, client linuxClient) map[string]system.WiFi {
++// collectLinux returns station readings and AP names from a single interface
++// query. A nil AP list signals that iwinfo discovery may be needed.
++func collectLinux(ctx context.Context, client linuxClient) (map[string]system.WiFi, []string) {
+ 	result := make(map[string]system.WiFi)
+-	if ctx.Err() != nil {
+-		return result
++	if ctx.Err() != nil || client == nil {
++		return result, nil
+ 	}
+ 	if deadline, ok := ctx.Deadline(); ok {
+ 		if client.SetDeadline(deadline) != nil {
+-			return result
++			return result, nil
+ 		}
+ 	}
+ 	interfaces, err := client.Interfaces()
+ 	if err != nil {
+-		return result
++		return result, nil
+ 	}
++	var aps []string
+ 	for _, iface := range interfaces {
+ 		if ctx.Err() != nil {
+ 			break
+ 		}
+-		if iface == nil || iface.Type != native.InterfaceTypeStation || iface.Name == "" {
++		if iface == nil || iface.Name == "" {
++			continue
++		}
++		// Only an inventory with at least one named interface is usable.
++		// Empty dumps can also come from unsupported proprietary drivers.
++		if aps == nil {
++			aps = make([]string, 0)
++		}
++		if iface.Type == native.InterfaceTypeAP {
++			aps = append(aps, iface.Name)
++		}
++		if iface.Type != native.InterfaceTypeStation {
+ 			continue
+ 		}
+ 		// GET_SCAN reads the kernel's BSS cache, without triggering a scan.
+@@ -151,5 +291,5 @@ func collectLinux(ctx context.Context, client linuxClient) map[string]system.WiF
+ 		}
+ 		result[iface.Name] = reading
+ 	}
+-	return result
++	return result, aps
+ }
